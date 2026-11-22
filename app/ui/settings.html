@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>promptmaxxer settings</title>
+<meta name="viewport" content="width=820">
+<link rel="stylesheet" href="shared.css">
+<style>
+body{min-width:760px}
+.wbar{position:sticky;top:0;z-index:5;background:var(--s)}
+.saved{position:absolute;right:26px;top:12px;font:600 12px/1 var(--round);color:var(--faint);display:flex;align-items:center;gap:8px;opacity:0;transition:opacity .32s var(--ease)}
+.saved.show{opacity:1}
+.set{display:grid;grid-template-columns:180px 1fr;gap:28px;padding:8px 30px 34px}
+.snav{position:sticky;top:50px;align-self:start;display:flex;flex-direction:column;gap:14px;padding-top:4px}
+.snav button{height:46px;border-radius:999px;box-shadow:var(--raise-xs);display:flex;align-items:center;gap:10px;padding:0 20px;font:600 14px/1 var(--round);color:var(--soft);border:0;background:var(--s);text-align:left}
+.snav button.on{box-shadow:var(--press-s);color:var(--ink)}
+.snav button .dot{display:none}
+.snav button.on .dot{display:inline-block}
+.content{min-width:0}
+section{scroll-margin-top:52px}
+/* engine list */
+.radio{width:22px;height:22px;border-radius:50%;box-shadow:var(--press-s);flex:none;position:relative;border:0;background:var(--s)}
+.radio.on::after{content:"";position:absolute;left:7px;top:7px;width:8px;height:8px;border-radius:50%;background:var(--uv);box-shadow:0 0 0 3px rgba(123,92,255,.14)}
+.radio[disabled]{opacity:.45;cursor:default}
+.erow{cursor:pointer}
+.erow.off{cursor:default}
+.erow .k b{font-weight:600}
+.erow .res{display:block;font:500 12px/1.35 var(--round);color:var(--soft);margin-top:2px}
+.erow .res.ok::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--volt);box-shadow:inset 0 0 0 1px var(--volt-ring);margin-right:6px;vertical-align:1px}
+.st{min-width:128px;justify-content:flex-start}
+.keyrow .field{flex:1;min-width:0}
+.msg{font-size:12px;color:var(--soft);padding:0 0 12px 36px;margin-top:-4px}
+.msg.ok{color:var(--ink)}
+.indent{padding-left:36px}
+/* keys */
+.combo{display:inline-flex;gap:6px;align-items:center;border:0;background:transparent;padding:6px;margin:-6px;border-radius:14px}
+.combo.rec{box-shadow:var(--press-s);padding:6px 12px;margin:-6px 0}
+.combo .ph{font:600 12px/1 var(--round);color:var(--faint)}
+select.pick{min-width:170px}
+.notes{font-size:13px;color:var(--soft);line-height:1.5;padding:4px 0 12px}
+.grp textarea{margin:2px 0 12px;height:96px}
+.blk{display:flex;align-items:center;gap:10px;min-height:44px}
+.blk .bp{flex:1;font:500 13px/1.3 var(--mono);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.blk .round{width:30px;height:30px}
+.blk .round svg{width:11px;height:11px}
+.add{display:flex;gap:10px;align-items:center;padding:8px 0 12px}
+.add .field{flex:1}
+.priv{display:flex;gap:16px;align-items:flex-start;padding:16px 0}
+.priv .ic{width:40px;height:40px;border-radius:50%;box-shadow:var(--raise-xs);display:grid;place-items:center;flex:none}
+.priv .ic img{width:24px;height:24px}
+.priv p{font-size:13px;color:var(--soft);line-height:1.55}
+.priv p b{color:var(--ink);font-weight:600;display:block;font-size:14px;margin-bottom:2px}
+</style>
+</head>
+<body>
+<div class="wbar" data-tauri-drag-region><i></i><i></i><i></i><span class="t" data-tauri-drag-region>promptmaxxer settings</span><span class="saved" id="saved"><span class="dot volt"></span>Saved</span></div>
+<div class="set">
+  <nav class="snav" id="nav">
+    <button data-s="engine" class="on"><span class="dot uv"></span>Engine</button>
+    <button data-s="keys"><span class="dot uv"></span>Keys</button>
+    <button data-s="about"><span class="dot uv"></span>About me</button>
+    <button data-s="context"><span class="dot uv"></span>Context</button>
+    <button data-s="general"><span class="dot uv"></span>General</button>
+    <button data-s="privacy"><span class="dot uv"></span>Privacy</button>
+  </nav>
+  <div class="content">
+    <section id="engine" class="grp">
+      <h5>Engine · the AI that writes your prompts</h5>
+      <div id="engines"></div>
+      <div class="row keyrow" id="keyrow">
+        <span class="indent" style="flex:none;font-size:13px;color:var(--soft);width:146px">Anthropic key</span>
+        <label class="field sm"><input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" aria-label="Anthropic API key"></label>
+        <button class="b xs" id="saveKey">Save</button>
+        <button class="b ghost xs" id="delKey">Remove</button>
+      </div>
+      <div class="msg" id="keyMsg">Kept in the macOS Keychain, never in a file. Get one at <span class="mono">console.anthropic.com</span>.</div>
+    </section>
+
+    <section id="keys" class="grp">
+      <h5>Keys and engine per key</h5>
+      <div class="row"><span class="k">Fast maxx<small>Short prompt, fast model</small></span><button class="combo" id="fastKey" data-k="fast_key"></button><select class="pick" id="engFast" data-k="engine_fast" aria-label="Engine for the fast key"></select></div>
+      <div class="row"><span class="k">Max maxx<small>Full brief, strongest model</small></span><button class="combo" id="maxKey" data-k="max_key"></button><select class="pick" id="engMax" data-k="engine_max" aria-label="Engine for the max key"></select></div>
+    </section>
+
+    <section id="about" class="grp">
+      <h5>About me</h5>
+      <div class="notes">Added to every prompt. Who you are, how you like answers, rules that always apply. Keep it short.</div>
+      <textarea class="well-text selectable" id="aboutMe" placeholder="I run a small web studio on a Mac. Plain English, short steps, exact commands."></textarea>
+    </section>
+
+    <section id="context" class="grp">
+      <h5>Context sources</h5>
+      <div class="row"><span class="k mono" style="font-size:13px">~/.claude/CLAUDE.md</span><button class="tg sm" data-src="claude_user" aria-label="Read ~/.claude/CLAUDE.md"></button></div>
+      <div class="row"><span class="k mono" style="font-size:13px">~/.codex/AGENTS.md</span><button class="tg sm" data-src="codex_user" aria-label="Read ~/.codex/AGENTS.md"></button></div>
+      <div class="row"><span class="k">Project files<small>CLAUDE.md, AGENTS.md and project memory of the project you are in</small></span><button class="tg sm" data-src="project_files" aria-label="Read project files"></button></div>
+      <h5 style="padding-top:18px">Never read these projects</h5>
+      <div id="blocked"></div>
+      <div class="add"><label class="field sm"><input id="blockPath" class="mono" spellcheck="false" placeholder="~/Code/client-portal" style="font-size:12.5px"></label><button class="b xs" id="blockAdd">Add</button></div>
+    </section>
+
+    <section id="general" class="grp">
+      <div class="row"><span class="k">Keep history<small>On this Mac only</small></span><button class="tg sm" data-k="history" aria-label="Keep history"></button></div>
+      <div class="row"><span class="k">Start at login</span><button class="tg sm" data-k="start_at_login" aria-label="Start at login"></button></div>
+      <div class="row"><span class="k">Sound<small>A soft click when a prompt is maxxed</small></span><button class="tg sm" data-k="sound" aria-label="Sound"></button></div>
+    </section>
+
+    <section id="privacy" class="grp" style="margin-bottom:0">
+      <div class="priv">
+        <span class="ic"><img class="mark" src="mark.svg" alt=""></span>
+        <p><b>Everything stays on your Mac except the call to the AI you picked.</b>No account, no tracking, no analytics. Your Anthropic key lives in the macOS Keychain. A secret scanner removes keys and passwords before anything is sent. promptmaxxer never sends, posts or presses Enter.</p>
+      </div>
+    </section>
+  </div>
+</div>
+<script src="shared.js"></script>
+<script>
+(async function () {
+  const { $, $$, esc, invoke, keyCaps, comboFromEvent, ENGINES } = PMX;
+  const ABOUT = {
+    "anthropic-key": "Pay per use with your own key. Fastest.",
+    "claude-plan": "Your Claude subscription, through Claude Code",
+    "chatgpt-plan": "Your ChatGPT subscription, through Codex",
+    "gemini-plan": "Your Google account, through Gemini CLI",
+  };
+  let S = await invoke("get_settings");
+  let engines = [];
+  const tests = {}; // id -> {busy, ok, text}
+
+  // ---------- save (debounced, on every change) ----------
+  let saveT, savedT;
+  function save() {
+    clearTimeout(saveT);
+    saveT = setTimeout(async () => {
+      await invoke("save_settings", { settings: S });
+      $("#saved").classList.add("show"); clearTimeout(savedT);
+      savedT = setTimeout(() => $("#saved").classList.remove("show"), 1600);
+    }, 250);
+  }
+
+  // ---------- engine ----------
+  const firstReady = () => (engines.find((e) => e.ready) || {}).id;
+  function renderEngines() {
+    const auto = S.engine === "auto" || !S.engine;
+    const now = firstReady();
+    const rows = [`<div class="row erow" data-pick="auto">
+        <button class="radio ${auto ? "on" : ""}" aria-label="Auto"></button>
+        <span class="k"><b>Auto</b><small>${now ? "Uses the first ready engine. Now: " + esc(PMX.engineLabel(now)) : "No engine is ready yet."}</small></span></div>`];
+    engines.forEach((e) => {
+      const t = tests[e.id] || {};
+      const res = t.busy ? '<span class="res">Testing…</span>' : t.text ? `<span class="res ${t.ok ? "ok" : ""}">${esc(t.text)}</span>` : "";
+      rows.push(`<div class="row erow ${e.ready ? "" : "off"}" data-pick="${e.ready ? esc(e.id) : ""}">
+        <button class="radio ${!auto && S.engine === e.id ? "on" : ""}" ${e.ready ? "" : "disabled"} aria-label="${esc(e.label)}"></button>
+        <span class="k"><b>${esc(e.label)}</b><small>${esc(ABOUT[e.id] || "")}</small>${res}</span>
+        <span class="st ${e.ready ? "" : "no"}"><span class="dot ${e.ready ? "volt" : "off"}"></span>${esc(e.detail)}</span>
+        <button class="b xs" data-test="${esc(e.id)}" ${e.ready && !t.busy ? "" : "disabled"}>Test</button></div>`);
+    });
+    $("#engines").innerHTML = rows.join("");
+    const key = engines.find((e) => e.id === "anthropic-key");
+    $("#delKey").disabled = !(key && key.ready);
+    renderPicks();
+  }
+  function renderPicks() {
+    ["#engFast", "#engMax"].forEach((sel) => {
+      const el = $(sel), k = el.dataset.k;
+      el.innerHTML = `<option value="">Same as Engine</option>` + engines.map((e) =>
+        `<option value="${esc(e.id)}" ${e.ready ? "" : "disabled"}>${esc(e.label)}${e.ready ? "" : " · not ready"}</option>`).join("");
+      el.value = S[k] || "";
+    });
+  }
+  async function loadEngines() { engines = await invoke("list_engines"); renderEngines(); }
+
+  async function runTest(id) {
+    tests[id] = { busy: true }; renderEngines();
+    try {
+      const r = await invoke("test_engine", { engine: id });
+      tests[id] = r.ok ? { ok: true, text: `Works · ${(r.ms / 1000).toFixed(1)} s${r.model ? " · " + r.model : ""}` } : { ok: false, text: r.error || "Test failed." };
+    } catch (e) { tests[id] = { ok: false, text: String(e) }; }
+    renderEngines();
+  }
+  $("#engines").addEventListener("click", async (ev) => {
+    const tb = ev.target.closest("[data-test]");
+    if (tb) { runTest(tb.dataset.test); return; }
+    const row = ev.target.closest("[data-pick]");
+    if (!row || !row.dataset.pick) return;
+    S.engine = row.dataset.pick; renderEngines(); save();
+  });
+  ["#engFast", "#engMax"].forEach((sel) => $(sel).addEventListener("change", (e) => { S[e.target.dataset.k] = e.target.value || null; save(); }));
+
+  // ---------- Anthropic key: never shown back ----------
+  $("#saveKey").addEventListener("click", async () => {
+    const v = $("#apikey").value.trim();
+    if (!v) { $("#keyMsg").textContent = "Paste your key first."; return; }
+    $("#saveKey").disabled = true;
+    const r = await invoke("save_api_key", { provider: "anthropic", key: v });
+    $("#apikey").value = ""; $("#saveKey").disabled = false;
+    $("#keyMsg").className = "msg" + (r && r.ok ? " ok" : "");
+    $("#keyMsg").textContent = r && r.ok ? "Saved in the macOS Keychain." : (r && r.error) || "Couldn't save the key.";
+    loadEngines();
+  });
+  $("#delKey").addEventListener("click", async () => {
+    await invoke("delete_api_key", { provider: "anthropic" });
+    $("#keyMsg").className = "msg"; $("#keyMsg").textContent = "Key removed from the Keychain.";
+    delete tests["anthropic-key"]; loadEngines();
+  });
+
+  // ---------- shortcuts ----------
+  let recording = null;
+  function renderKeys() {
+    $$(".combo").forEach((b) => {
+      const rec = recording === b;
+      b.classList.toggle("rec", rec);
+      b.innerHTML = rec ? '<span class="ph">Press the new keys…</span>' : keyCaps(S[b.dataset.k]);
+      b.title = rec ? "Esc to stop" : "Click to change";
+    });
+  }
+  $$(".combo").forEach((b) => b.addEventListener("click", () => { recording = recording === b ? null : b; renderKeys(); }));
+  document.addEventListener("keydown", (e) => {
+    if (!recording) return;
+    e.preventDefault();
+    if (e.key === "Escape") { recording = null; renderKeys(); return; }
+    const c = comboFromEvent(e);
+    if (!c) return;
+    S[recording.dataset.k] = c; recording = null; renderKeys(); save();
+  });
+
+  // ---------- about me, sources, blocked, general ----------
+  $("#aboutMe").value = S.about_me || "";
+  $("#aboutMe").addEventListener("input", (e) => { S.about_me = e.target.value; save(); });
+  function renderToggles() {
+    $$("[data-src]").forEach((t) => t.classList.toggle("on", !!(S.sources || {})[t.dataset.src]));
+    $$(".tg[data-k]").forEach((t) => t.classList.toggle("on", !!S[t.dataset.k]));
+  }
+  $$("[data-src]").forEach((t) => t.addEventListener("click", () => { S.sources = S.sources || {}; S.sources[t.dataset.src] = !S.sources[t.dataset.src]; renderToggles(); save(); }));
+  $$(".tg[data-k]").forEach((t) => t.addEventListener("click", () => { S[t.dataset.k] = !S[t.dataset.k]; renderToggles(); save(); }));
+  function renderBlocked() {
+    const list = S.blocked_projects || [];
+    $("#blocked").innerHTML = list.length ? list.map((p, i) =>
+      `<div class="blk"><span class="bp" title="${esc(p)}">${esc(p)}</span><button class="round" data-rm="${i}" aria-label="Stop blocking">${PMX.ICON.x}</button></div>`).join("")
+      : '<div class="notes" style="padding:6px 0 2px">None. Every project you work in can be read.</div>';
+  }
+  $("#blocked").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (!b) return; S.blocked_projects.splice(+b.dataset.rm, 1); renderBlocked(); save(); });
+  function addBlocked() { const v = $("#blockPath").value.trim(); if (!v) return; S.blocked_projects = (S.blocked_projects || []).concat(v); $("#blockPath").value = ""; renderBlocked(); save(); }
+  $("#blockAdd").addEventListener("click", addBlocked);
+  $("#blockPath").addEventListener("keydown", (e) => { if (e.key === "Enter") addBlocked(); });
+
+  // ---------- nav ----------
+  $$("#nav button").forEach((b) => b.addEventListener("click", () => document.getElementById(b.dataset.s).scrollIntoView({ behavior: "smooth" })));
+  function spy() {
+    let cur = "engine";
+    $$("section").forEach((s) => { if (s.getBoundingClientRect().top < 140) cur = s.id; });
+    if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) cur = "privacy";
+    $$("#nav button").forEach((b) => b.classList.toggle("on", b.dataset.s === cur));
+  }
+  window.addEventListener("scroll", spy, { passive: true });
+
+  renderKeys(); renderToggles(); renderBlocked();
+  await loadEngines();
+
+  // browser preview only: ?test=all runs every ready engine's Test once
+  if (!PMX.LIVE && PMX.query.get("test") === "all") engines.filter((e) => e.ready).forEach((e) => runTest(e.id));
+})();
+</script>
+</body>
+</html>

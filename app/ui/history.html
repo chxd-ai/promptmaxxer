@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>promptmaxxer history</title>
+<meta name="viewport" content="width=1180">
+<link rel="stylesheet" href="shared.css">
+<style>
+body{min-width:980px}
+.wbar{position:sticky;top:0;z-index:5;background:var(--s)}
+main{padding:10px 36px 30px}
+.hhead{display:flex;gap:20px;align-items:center;margin-bottom:26px}
+.hhead .field{flex:1;max-width:520px}
+.hhead .count{font-size:13px;color:var(--faint);margin-left:auto;white-space:nowrap}
+.confirm{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--soft);white-space:nowrap}
+.hoff{display:flex;align-items:center;gap:16px;border-radius:30px;box-shadow:var(--press-s);padding:12px 14px 12px 22px;margin-bottom:24px;font-size:14px}
+.hoff .k{flex:1}
+.hoff small{display:block;font-size:12px;color:var(--faint)}
+.hcols,.hrow .line,.hrow .full{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) 118px 104px 140px 196px;gap:18px;align-items:center}
+.hcols{padding:0 14px 12px 30px}
+.hrow{border-radius:34px;box-shadow:var(--raise-s);padding:10px 14px 10px 30px;margin-bottom:18px;font-size:14px;cursor:pointer;transition:box-shadow .18s var(--ease)}
+.hrow.on{box-shadow:var(--press-s);cursor:default}
+.hrow .o{color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hrow .res{font:12.5px/1.4 var(--mono);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hrow .res.fail{font-family:var(--round);font-size:13px;color:var(--faint)}
+.hrow .tgt{display:inline-flex;align-items:center;justify-content:center;max-width:100%;height:32px;border-radius:999px;box-shadow:var(--press-s);font-size:12px;font-weight:600;padding:0 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hrow .pj{font-size:13px;color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hrow .pj.none{color:var(--faint)}
+.hrow .tm{font-size:12px;color:var(--soft);white-space:nowrap;line-height:1.35;overflow:hidden;text-overflow:ellipsis}
+.hrow .tm small{display:block;font-size:11px;color:var(--faint);overflow:hidden;text-overflow:ellipsis}
+.hrow .acts{display:flex;gap:7px;justify-content:flex-end;align-items:center}
+.hrow .acts .round{width:30px;height:30px}
+.hrow .acts .round svg{width:12px;height:12px}
+.hrow .acts .sep{width:1px;height:22px;background:var(--groove);margin:0 5px}
+.hrow .full{align-items:start;padding:14px 0 8px}
+.hrow .full > div + div{grid-column:2 / -1}
+.hrow .full .lab{display:block;margin-bottom:8px}
+.hrow .full p{font-size:13px;color:var(--soft);white-space:pre-wrap;line-height:1.55}
+.hrow .full pre{font:12.5px/1.6 var(--mono);color:var(--ink);white-space:pre-wrap;word-break:break-word;border-radius:20px;box-shadow:var(--raise-xs);padding:12px 16px}
+.empty{text-align:center;padding:54px 0 40px}
+.big{width:170px;height:170px;border-radius:50%;margin:0 auto 26px;box-shadow:var(--raise);display:grid;place-items:center}
+.big .in{width:120px;height:120px;border-radius:50%;box-shadow:var(--press-s);display:grid;place-items:center}
+.big img{width:64px;height:64px}
+.empty h4{font:600 24px/1.2 var(--round);margin-bottom:8px}
+.empty p{font-size:15px;color:var(--soft);max-width:420px;margin:0 auto}
+.empty .kc{vertical-align:middle;margin:0 2px}
+</style>
+</head>
+<body>
+<div class="wbar" data-tauri-drag-region><i></i><i></i><i></i><span class="t" data-tauri-drag-region>History</span></div>
+<main>
+  <div class="hoff hidden" id="off"><span class="dot off"></span><span class="k">History is off<small>New prompts are not saved. Turn it on in Settings.</small></span><button class="b sm" id="openSettings">Open Settings</button></div>
+  <div class="hhead">
+    <label class="field"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg><input id="q" type="search" spellcheck="false" placeholder="Search drafts, results, projects" aria-label="Search history"></label>
+    <span class="count" id="count"></span>
+    <button class="b sm ghost" id="clear">Delete all</button>
+    <span class="confirm hidden" id="confirm"><span id="confirmText">Delete all?</span><button class="b xs" id="yes">Delete</button><button class="b ghost xs" id="no">Keep</button></span>
+  </div>
+  <div class="hcols lab" id="cols"><span>Original</span><span>Result</span><span>Target</span><span>Project</span><span>When · engine</span><span style="text-align:right">Rate · Copy · Max · Delete</span></div>
+  <div id="list"></div>
+  <div class="empty hidden" id="empty">
+    <div class="big"><div class="in"><img class="mark" src="mark.svg" alt=""></div></div>
+    <h4 id="emptyTitle">No prompts yet</h4>
+    <p id="emptyText"></p>
+  </div>
+</main>
+<script src="shared.js"></script>
+<script>
+(async function () {
+  const { $, esc, invoke, ago, toast, ICON, engineLabel, keyCaps } = PMX;
+  let items = [], open = null, total = 0, fastKey = "Alt+Space";
+
+  try {
+    const s = await invoke("get_settings");
+    fastKey = s.fast_key || fastKey;
+    $("#off").classList.toggle("hidden", s.history !== false);
+  } catch (e) {}
+
+  function row(h) {
+    const on = open === h.id;
+    const eng = [engineLabel(h.engine), h.model].filter(Boolean).join(" · ") + (h.level === "max" ? " · max" : "");
+    const res = h.ok === false ? '<span class="res fail">Not maxxed. Text unchanged.</span>' : `<span class="res">${esc((h.output || "").split("\n")[0])}</span>`;
+    return `<div class="hrow ${on ? "on" : ""}" data-id="${esc(h.id)}">
+      <div class="line">
+        <span class="o" title="${esc(h.draft)}">${esc(h.draft)}</span>${res}
+        <span><span class="tgt" title="${esc(h.target || h.app || "")}">${esc(h.target || h.app || "Unknown")}</span></span>
+        <span class="pj ${h.project ? "" : "none"}">${esc(h.project || "None")}</span>
+        <span class="tm">${esc(ago(h.ts))}<small title="${esc(eng)}">${esc(eng)}</small></span>
+        <span class="acts">
+          <button class="round ${h.thumb === true ? "on" : ""}" data-a="up" title="Good prompt" aria-label="Thumbs up" ${h.ok === false ? "disabled" : ""}>${ICON.up}</button>
+          <button class="round ${h.thumb === false ? "on" : ""}" data-a="down" title="Bad prompt" aria-label="Thumbs down" ${h.ok === false ? "disabled" : ""}>${ICON.down}</button>
+          <span class="sep"></span>
+          <button class="round" data-a="copy" title="Copy result" aria-label="Copy" ${h.ok === false ? "disabled" : ""}>${ICON.copy}</button>
+          <button class="round" data-a="max" title="Re-run as max" aria-label="Re-run as max">${ICON.rerun}</button>
+          <button class="round" data-a="del" title="Delete" aria-label="Delete">${ICON.trash}</button>
+        </span>
+      </div>
+      ${on ? `<div class="full"><div><span class="lab">Original</span><p class="selectable">${esc(h.draft)}</p></div>
+        <div><span class="lab">Result</span>${h.ok === false ? '<p>Not maxxed. Your text was left unchanged.</p>' : `<pre class="selectable">${esc(h.output)}</pre>`}</div></div>` : ""}
+    </div>`;
+  }
+
+  async function load() {
+    const query = $("#q").value;
+    items = await invoke("history_list", { query });
+    total = query ? (await invoke("history_list", { query: "" })).length : items.length;
+    $("#list").innerHTML = items.map(row).join("");
+    const none = !items.length;
+    $("#empty").classList.toggle("hidden", !none);
+    $("#cols").classList.toggle("hidden", none);
+    $("#clear").disabled = !total;
+    $("#count").textContent = query ? `${items.length} of ${total} · on this Mac` : `${total} prompt${total === 1 ? "" : "s"} · on this Mac`;
+    if (none && query) { $("#emptyTitle").textContent = "Nothing matches"; $("#emptyText").textContent = `No draft, result or project has “${query}”.`; }
+    else if (none) { $("#emptyTitle").textContent = "No prompts yet"; $("#emptyText").innerHTML = `Highlight text in any app and press ${keyCaps(fastKey, "xs")}. Your maxxed prompts show up here, on this Mac only.`; }
+  }
+
+  let qT;
+  $("#q").addEventListener("input", () => { clearTimeout(qT); qT = setTimeout(load, 150); });
+
+  $("#list").addEventListener("click", async (e) => {
+    const r = e.target.closest(".hrow"); if (!r) return;
+    const id = r.dataset.id, h = items.find((x) => x.id === id);
+    const b = e.target.closest("[data-a]");
+    if (!b) { if (!e.target.closest(".full")) { open = open === id ? null : id; $("#list").innerHTML = items.map(row).join(""); } return; }
+    const a = b.dataset.a;
+    if (a === "up" || a === "down") {
+      const want = a === "up";
+      const next = h.thumb === want ? null : want;
+      await invoke("history_thumb", { id, up: next }); h.thumb = next;
+      $("#list").innerHTML = items.map(row).join("");
+    } else if (a === "copy") { await invoke("history_copy", { id }); toast("Copied.", "volt"); }
+    else if (a === "max") { await invoke("history_rerun", { id, level: "max" }); toast("Re-running as max.", "uv"); setTimeout(load, 1500); }
+    else if (a === "del") { await invoke("history_delete", { id }); if (open === id) open = null; load(); }
+  });
+
+  $("#clear").addEventListener("click", () => {
+    $("#confirmText").textContent = `Delete all ${total}?`;
+    $("#clear").classList.add("hidden"); $("#confirm").classList.remove("hidden");
+  });
+  const closeConfirm = () => { $("#clear").classList.remove("hidden"); $("#confirm").classList.add("hidden"); };
+  $("#no").addEventListener("click", closeConfirm);
+  $("#yes").addEventListener("click", async () => { await invoke("history_delete", { id: null }); open = null; closeConfirm(); load(); });
+  $("#openSettings").addEventListener("click", () => invoke("open_settings"));
+
+  if (!PMX.LIVE && PMX.query.get("open")) open = PMX.query.get("open");
+  if (!PMX.LIVE && PMX.query.get("q")) $("#q").value = PMX.query.get("q");
+  await load();
+})();
+</script>
+</body>
+</html>

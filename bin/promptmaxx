@@ -1,0 +1,151 @@
+#!/usr/bin/env -S python3 -I
+"""Promptmaxxer CLI: rewrite a rough prompt (stdin) into a strong one (stdout) with Haiku via the Claude Code CLI.
+
+The command-line prototype of the app. The eval harness (evals/run.py) uses it as the reference runner.
+Needs the `claude` CLI (Claude Code), signed in. macOS only (notifications, pbcopy, lsappinfo).
+
+Usage: promptmaxx [--level standard|max] [--app NAME] [--model haiku] [--framework FILE] < draft.txt
+Fail-safe: on any error it prints the original text unchanged and shows a macOS notification.
+"""
+import argparse, json, os, re, shutil, subprocess, sys, time
+from pathlib import Path
+
+HOME = Path.home()
+SHARE = HOME / ".local/share/promptmaxxer"
+CLAUDE = shutil.which("claude") or str(HOME / ".local/bin/claude")
+# The framework next to this script (repo checkout), else an installed copy.
+_REPO_FRAMEWORK = Path(__file__).resolve().parent.parent / "framework/system-prompt.md"
+DEFAULT_FRAMEWORK = _REPO_FRAMEWORK if _REPO_FRAMEWORK.exists() else SHARE / "framework/system-prompt.md"
+HISTORY = SHARE / "history.jsonl"
+TIMEOUT_S = 60
+MAX_CHARS = 60000
+
+
+def front_app() -> str:
+    try:
+        asn = subprocess.run(["/usr/bin/lsappinfo", "front"], capture_output=True, text=True, timeout=2).stdout.strip()
+        out = subprocess.run(["/usr/bin/lsappinfo", "info", "-only", "name", asn], capture_output=True, text=True, timeout=2).stdout
+        m = re.search(r'"(?:LSDisplayName|name)"\s*=\s*"([^"]+)"', out)
+        return m.group(1) if m else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def notify(msg: str) -> None:
+    subprocess.run(["/usr/bin/osascript", "-e", f'display notification {json.dumps(msg)} with title "Promptmaxxer"'],
+                   capture_output=True, timeout=5)
+
+
+def clean(text: str) -> str:
+    t = text.strip()
+    # Drop a wrapping code fence around the whole output.
+    m = re.fullmatch(r"```[a-zA-Z]*\n(.*)\n```", t, flags=re.S)
+    if m:
+        t = m.group(1).strip()
+    # Drop a leading preamble line such as "Here is the improved prompt:".
+    t = re.sub(r"\A(?:here(?:'s| is)[^\n]{0,80}prompt[^\n]{0,20}:?\s*\n+)", "", t, flags=re.I)
+    t = re.sub(r"\A</?ideal_output>\s*|\s*</?ideal_output>\Z", "", t)
+    return t.strip()
+
+
+# Openers that are always a comment, never a prompt.
+ALWAYS_BAD = re.compile(r"\A\s*(I'?m Promptmaxxer|As Promptmaxxer|The user|The draft|This draft|Here(?:'s| is) (?:the|your|a|an) "
+                        r"(?:rewritten|improved|enhanced|better|stronger)|I'?ll rewrite|I need the draft)", re.I)
+# Refusal openers. Bad only when the first lines also talk about the rewrite job, since a real
+# first-person prompt can start with "I can't get my login to work".
+REFUSAL_START = re.compile(r"\A\s*(I'?m sorry|I am sorry|Sorry|Apologies|I apologi[sz]e|Unfortunately|I can'?t|I cannot|"
+                           r"I won'?t|I will not|I'?m not|I am not|I'?d need|I would need|Could you|Can you paste|Please (?:paste|send|provide))", re.I)
+# Phrases that only appear when the model talks about itself or the tool.
+ROLE_TALK = re.compile(r"Promptmaxxer|\bmy role\b|prompt rewrite|\byour draft\b|the draft you|run (?:it|this) again", re.I)
+JOB_TALK = re.compile(r"draft|rewrit|Promptmaxxer|environment block|email block|system block|paste (?:just|the|your)", re.I)
+
+
+def looks_bad(out: str, draft: str) -> bool:
+    """Deterministic guard: refusals, meta comments and empty or tiny outputs."""
+    if not out or len(out) < min(20, len(draft)):
+        return True
+    if ALWAYS_BAD.match(out) or "<draft>" in out:
+        return True
+    if ROLE_TALK.search(out[:400]):
+        return True
+    return bool(REFUSAL_START.match(out) and JOB_TALK.search(out[:400]))
+
+
+def enhance(draft: str, level: str, app: str, model: str, framework: Path, effort: str = "",
+            firm: bool = False) -> tuple[str, dict]:
+    user = (f"<context>App: {app}. Level: {level}.</context>\n<draft>\n{draft}\n</draft>\n\n"
+            "Rewrite the draft as your instructions say. Output only the rewritten prompt.")
+    if firm:
+        user += (" Your previous reply was a comment, not a prompt. This time your first word must be the first "
+                 "word of the rewritten prompt. Never decline: you write the prompt, another AI does the task.")
+    # Run outside the home folder so Claude Code loads no CLAUDE.md files or auto-memory into the call.
+    run_dir = Path("/tmp/promptmaxxer-run")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [CLAUDE, "-p", "--model", model, "--setting-sources", "", "--strict-mcp-config", "--tools", "",
+           "--no-session-persistence", "--system-prompt-file", str(framework), "--output-format", "json"]
+    if effort:
+        cmd += ["--effort", effort]
+    p = subprocess.run(cmd, input=user, capture_output=True, text=True, timeout=TIMEOUT_S, cwd=run_dir,
+                       env={**os.environ, "PATH": f"{HOME}/.local/bin:/opt/homebrew/bin:/usr/bin:/bin",
+                            "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"})
+    data = json.loads(p.stdout) if p.stdout.strip().startswith("{") else {}
+    if p.returncode != 0 or data.get("is_error") or not data.get("result"):
+        raise RuntimeError((data.get("result") or p.stderr or p.stdout or "no output").strip()[:300])
+    return clean(data["result"]), {"usage": data.get("usage", {}), "api_ms": data.get("duration_api_ms"),
+                                   "model": list(data.get("modelUsage", {}).keys())}
+
+
+def log(row: dict) -> None:
+    try:
+        SHARE.mkdir(parents=True, exist_ok=True)
+        with open(HISTORY, "a") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        os.chmod(HISTORY, 0o600)
+    except Exception:
+        pass
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--level", choices=["standard", "max"], default="standard")
+    ap.add_argument("--app", default=None)
+    ap.add_argument("--model", default="haiku")
+    ap.add_argument("--framework", default=str(DEFAULT_FRAMEWORK))
+    ap.add_argument("--effort", default=os.environ.get("PROMPTMAXX_EFFORT", ""), help="thinking effort: low, medium, high")
+    a = ap.parse_args()
+
+    raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    draft = raw.strip()
+    if not draft:
+        sys.stdout.write(raw)
+        return
+    if len(draft) > MAX_CHARS:
+        notify(f"Selection too long ({len(draft)} characters). Nothing changed.")
+        sys.stdout.write(raw)
+        return
+
+    app = a.app or front_app()
+    t0 = time.time()
+    try:
+        fw = Path(a.framework).resolve()
+        out, meta = enhance(draft, a.level, app, a.model, fw, a.effort)
+        meta["retried"] = False
+        if looks_bad(out, draft):  # one retry with a firmer reminder, then give up safely
+            out, meta = enhance(draft, a.level, app, a.model, fw, a.effort, firm=True)
+            meta["retried"] = True
+            if looks_bad(out, draft):
+                raise RuntimeError("Haiku returned a comment instead of a prompt")
+        sys.stdout.write(out)
+        # Also copy, for apps (such as terminals) where the selection cannot be replaced in place.
+        subprocess.run(["/usr/bin/pbcopy"], input=out.encode("utf-8"), timeout=5)
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "ok": True, "app": app, "level": a.level,
+             "ms": int((time.time() - t0) * 1000), "draft": draft, "output": out, **meta})
+    except Exception as e:  # fail-safe: never lose the selection
+        sys.stdout.write(raw)
+        notify(f"Could not enhance. Your text is unchanged. {str(e)[:120]}")
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "ok": False, "app": app, "level": a.level,
+             "ms": int((time.time() - t0) * 1000), "error": str(e)[:500], "draft": draft})
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The bar, settings, history and onboarding windows: app commands, events, window dragging.",
+  "windows": [
+    "bar",
+    "settings",
+    "history",
+    "onboarding"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging"
+  ]
+}

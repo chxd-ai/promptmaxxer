@@ -1,0 +1,115 @@
+/* promptmaxxer UI · V8 Soft neumorphic.
+   One soft grey surface. Every shape is pressed into it or raised out of it.
+   Colour: soft greys only. A tiny Ultraviolet or Volt dot marks state, nothing else. */
+:root{
+  --s:#E3E6EC; --hi:#FFFFFF; --lo:#BCC2CC; --groove:#D8DCE3;
+  --ink:#383D4B; --soft:#737A8A; --faint:#A3A9B5;
+  --uv:#7B5CFF; --volt:#C6FF3D; --volt-ring:#8FB52A;
+  --raise:9px 9px 18px var(--lo), -9px -9px 18px var(--hi);
+  --raise-s:4px 4px 9px var(--lo), -4px -4px 9px var(--hi);
+  --raise-xs:2px 2px 5px var(--lo), -2px -2px 5px var(--hi);
+  --float:20px 20px 40px #B5BBC6, -20px -20px 40px var(--hi);
+  --press:inset 6px 6px 12px var(--lo), inset -6px -6px 12px var(--hi);
+  --press-s:inset 3px 3px 6px var(--lo), inset -3px -3px 6px var(--hi);
+  --round:"Avenir Next", "Avenir", Inter, -apple-system, sans-serif;
+  --mono:"JetBrains Mono", "JetBrainsMono Nerd Font", "JetBrainsMonoNL Nerd Font", Menlo, monospace;
+  --ease:cubic-bezier(.4,0,.2,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--s)}
+body{font:500 15px/1.5 var(--round);color:var(--ink);-webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;cursor:default}
+input,textarea,.selectable{-webkit-user-select:text;user-select:text}
+button{font-family:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:2px solid rgba(123,92,255,.45);outline-offset:3px}
+.mono{font-family:var(--mono)}
+.hidden{display:none!important}
+img.mark{display:block}
+
+/* depth helpers */
+.r{box-shadow:var(--raise)} .rs{box-shadow:var(--raise-s)} .rx{box-shadow:var(--raise-xs)} .p{box-shadow:var(--press)} .ps{box-shadow:var(--press-s)}
+
+/* state dots: the only colour */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dot.uv{background:var(--uv);box-shadow:0 0 0 3px rgba(123,92,255,.14)}
+.dot.volt{background:var(--volt);box-shadow:inset 0 0 0 1px var(--volt-ring),0 0 8px rgba(198,255,61,.9)}
+.dot.off{background:transparent;box-shadow:inset 0 0 0 1.5px var(--faint)}
+.dot.grey{background:var(--faint)}
+.lab{font:600 11px/1 var(--round);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+
+/* window chrome: drag region + title. Fake traffic lights only in the browser preview
+   (in Tauri use titleBarStyle "Overlay" + hiddenTitle so the real ones sit here). */
+.wbar{display:flex;align-items:center;gap:10px;height:38px;padding:0 22px;-webkit-app-region:drag}
+.wbar i{width:14px;height:14px;border-radius:50%;box-shadow:var(--press-s)}
+.wbar .t{flex:1;text-align:center;font:600 13px/1 var(--round);color:var(--faint);margin-right:66px}
+html.tauri .wbar i{visibility:hidden}
+
+/* buttons */
+.b{border:0;font:600 15px/1 var(--round);color:var(--ink);background:var(--s);height:50px;padding:0 28px;border-radius:999px;box-shadow:var(--raise-s);display:inline-flex;align-items:center;justify-content:center;gap:10px;transition:box-shadow .18s var(--ease),color .18s var(--ease);white-space:nowrap}
+.b:active{box-shadow:var(--press-s)}
+.b.primary{height:56px;padding:0 34px;font-size:16px;font-weight:700;box-shadow:var(--raise)}
+.b.primary:active{box-shadow:var(--press)}
+.b.ghost{box-shadow:none;color:var(--soft);padding:0 10px}
+.b.ghost:active{color:var(--ink)}
+.b[disabled]{box-shadow:none;color:var(--faint);border:1px solid var(--groove);cursor:default}
+.b.sm{height:38px;padding:0 20px;font-size:13px}
+.b.xs{height:30px;padding:0 14px;font-size:12px;box-shadow:var(--raise-xs)}
+.b.xs:active{box-shadow:var(--press-s)}
+.b.xs[disabled],.b.ghost.xs{box-shadow:none}
+
+/* fields */
+.field{height:52px;border-radius:999px;box-shadow:var(--press-s);display:flex;align-items:center;gap:12px;padding:0 22px;font-size:15px;color:var(--ink)}
+.field svg{width:16px;height:16px;stroke:var(--faint);fill:none;stroke-width:2;stroke-linecap:round;flex:none}
+.field input{flex:1;min-width:0;border:0;background:transparent;font:inherit;color:inherit;outline:none}
+.field input::placeholder{color:var(--faint)}
+.field.sm{height:40px;padding:0 16px;font-size:13px}
+.well-text{width:100%;border:0;border-radius:22px;box-shadow:var(--press-s);background:var(--s);padding:14px 18px;font:500 14px/1.5 var(--round);color:var(--ink);resize:none;outline:none}
+.well-text::placeholder{color:var(--faint)}
+select.pick{-webkit-appearance:none;appearance:none;border:0;height:34px;border-radius:999px;box-shadow:var(--press-s);background:var(--s) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23A3A9B5' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 14px center/10px 6px;padding:0 34px 0 16px;font:600 13px/1 var(--round);color:var(--ink);outline:none}
+
+.caret{display:inline-block;width:2px;height:18px;border-radius:1px;background:var(--ink);animation:blink 1.1s steps(1) infinite;vertical-align:-3px}
+@keyframes blink{50%{opacity:0}}
+
+/* toggle */
+.tg{width:68px;height:36px;border-radius:999px;box-shadow:var(--press-s);position:relative;flex:none;display:inline-block;border:0;background:var(--s)}
+.tg::before{content:"";position:absolute;top:5px;left:5px;width:26px;height:26px;border-radius:50%;background:var(--s);box-shadow:var(--raise-xs);transition:left .18s var(--ease)}
+.tg.on::before{left:37px}
+.tg.on::after{content:"";position:absolute;left:14px;top:14px;width:8px;height:8px;border-radius:50%;background:var(--uv);box-shadow:0 0 0 3px rgba(123,92,255,.14)}
+.tg.sm{width:52px;height:28px}
+.tg.sm::before{width:20px;height:20px;top:4px;left:4px}
+.tg.sm.on::before{left:28px}
+.tg.sm.on::after{left:11px;top:10px}
+
+/* keys */
+.kc{min-width:52px;height:52px;padding:0 14px;border-radius:16px;box-shadow:var(--raise-s);display:inline-flex;align-items:center;justify-content:center;font:600 17px/1 var(--round);color:var(--ink)}
+.kc.sm{min-width:30px;height:30px;border-radius:10px;font-size:12px;padding:0 9px;box-shadow:var(--raise-xs)}
+.kc.xs{min-width:24px;height:24px;border-radius:8px;font-size:11px;padding:0 7px;box-shadow:var(--raise-xs)}
+
+/* chip, status pill, round icon button */
+.chip{display:inline-flex;align-items:center;gap:10px;height:38px;padding:0 18px;border-radius:999px;box-shadow:var(--press-s);font:600 13px/1 var(--round);color:var(--ink);white-space:nowrap;border:0;background:var(--s)}
+.st{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 14px;border-radius:999px;box-shadow:var(--raise-xs);font:600 12px/1 var(--round);color:var(--ink);white-space:nowrap}
+.st.no{box-shadow:var(--press-s);color:var(--soft)}
+.round{width:40px;height:40px;border-radius:50%;box-shadow:var(--raise-xs);display:grid;place-items:center;border:0;background:var(--s);flex:none;transition:box-shadow .18s var(--ease)}
+.round svg{width:16px;height:16px;stroke:var(--soft);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.round:active,.round.on{box-shadow:var(--press-s)}
+.round.on svg{stroke:var(--ink)}
+.round[disabled]{box-shadow:none;border:1px solid var(--groove);cursor:default}
+.round[disabled] svg{stroke:var(--faint)}
+
+/* alert and toast */
+.alert{border-radius:30px;box-shadow:var(--raise-s);padding:20px 22px;display:flex;gap:16px;align-items:center}
+.alert .ic{width:46px;height:46px;border-radius:50%;box-shadow:var(--press-s);display:grid;place-items:center;font:700 19px/1 var(--round);color:var(--soft);flex:none}
+.alert b{display:block;font-weight:600;font-size:15px}
+.alert p{font-size:13px;color:var(--soft)}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);border-radius:999px;box-shadow:var(--float);background:var(--s);padding:14px 24px;display:inline-flex;gap:12px;align-items:center;font-weight:600;font-size:14px;opacity:0;pointer-events:none;transition:opacity .32s var(--ease);z-index:50;white-space:nowrap}
+.toast.show{opacity:1}
+
+/* settings-style groups */
+.grp{border-radius:28px;box-shadow:var(--press-s);padding:6px 20px;margin-bottom:18px}
+.grp .row{display:flex;align-items:center;gap:14px;min-height:52px;font-size:14px;padding:6px 0}
+.grp .row + .row{border-top:1px solid var(--groove)}
+.grp .row .k{flex:1;min-width:0}
+.grp .row .k small{display:block;font-size:12px;color:var(--faint);font-weight:500;line-height:1.35}
+.grp h5{font:600 11px/1 var(--round);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);padding:14px 0 4px}
+.seg{display:inline-flex;padding:4px;border-radius:999px;box-shadow:var(--press-s);gap:4px}
+.seg button{border:0;background:var(--s);height:30px;padding:0 16px;border-radius:999px;display:flex;align-items:center;font:600 13px/1 var(--round);color:var(--faint)}
+.seg button.on{box-shadow:var(--raise-xs);color:var(--ink)}

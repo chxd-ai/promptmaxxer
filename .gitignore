@@ -1,0 +1,34 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Tauri generated files
+app/src-tauri/gen/
+
+# Node
+node_modules/
+npm-debug.log*
+dist/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Eval output
+evals/results/
+
+# Logs, screenshots, browser tool state
+*.log
+_shots/
+.playwright-cli/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Local env and keys
+.env
+.env.*

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Welcome to promptmaxxer</title>
+<meta name="viewport" content="width=600">
+<link rel="stylesheet" href="shared.css">
+<style>
+html,body{height:100%}
+body{display:flex;flex-direction:column;min-width:560px}
+.onb{flex:1;display:flex;flex-direction:column;text-align:center;padding:0 40px 28px}
+.steps{display:flex;justify-content:center;gap:16px;margin:4px 0 30px}
+.steps i{width:34px;height:34px;border-radius:50%;box-shadow:var(--press-s);display:grid;place-items:center;font:700 12px/1 var(--round);color:var(--faint);font-style:normal;position:relative}
+.steps i.done{box-shadow:var(--raise-xs);color:var(--soft)}
+.steps i.now{box-shadow:var(--raise-s);color:var(--ink)}
+.steps i.now::after{content:"";position:absolute;bottom:-12px;left:50%;margin-left:-3px;width:6px;height:6px;border-radius:50%;background:var(--uv)}
+.pane{flex:1;display:flex;flex-direction:column;align-items:center}
+.big{width:170px;height:170px;border-radius:50%;margin:0 auto 26px;box-shadow:var(--raise);display:grid;place-items:center;flex:none}
+.big .in{width:120px;height:120px;border-radius:50%;box-shadow:var(--press-s);display:grid;place-items:center}
+.big svg{width:56px;height:56px;stroke:var(--ink);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.onb h4{font:600 28px/1.15 var(--round);margin-bottom:10px}
+.onb p{font-size:15px;color:var(--soft);max-width:420px;margin:0 auto 26px}
+.onb p .kc{vertical-align:middle;margin:0 1px}
+.tag{font:500 17px/1.2 var(--round);color:var(--soft);margin:-2px 0 14px}
+.tag b{font-weight:700;color:var(--ink);letter-spacing:.06em}
+.live{display:flex;align-items:center;gap:14px;border-radius:999px;box-shadow:var(--press-s);padding:12px 14px 12px 24px;margin:26px 0 0;text-align:left;font-size:14px;width:100%}
+.live .k{flex:1}
+.live .k small{display:block;font-size:12px;color:var(--faint)}
+.live .st{height:auto;padding:10px 18px;font-size:13px;gap:10px}
+.navrow{display:flex;justify-content:space-between;align-items:center;margin-top:26px;min-height:50px}
+.navrow > span{font-size:13px;color:var(--faint)}
+.navrow .b.ghost.inv{visibility:hidden}
+
+/* step 1: the floating bar, looping */
+.demo{width:100%;max-width:470px;margin:6px auto 30px;border-radius:40px;box-shadow:var(--press);padding:22px 22px 26px;text-align:left}
+.demo .sel{font-size:13px;color:var(--soft);margin:0 0 16px 14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.demo .sel span{color:var(--ink);border-bottom:2px solid rgba(123,92,255,.35)}
+.mini{border-radius:30px;box-shadow:var(--float);padding:14px 16px 14px;animation:pop 6s var(--ease) infinite}
+.mini .mt{display:flex;align-items:center;gap:10px;height:30px;position:relative}
+.mini .logo{width:30px;height:30px;border-radius:50%;box-shadow:var(--raise-xs);display:grid;place-items:center;flex:none}
+.mini .logo img{width:18px;height:18px}
+.mini .tt{position:relative;flex:1;height:20px}
+.mini .tt b{position:absolute;inset:0;font:600 13.5px/20px var(--round);display:flex;align-items:center;gap:7px;white-space:nowrap}
+.mini .tt b.a{animation:tA 6s steps(1) infinite}
+.mini .tt b.z{animation:tZ 6s steps(1) infinite}
+.mini .chip{height:26px;padding:0 11px;font-size:11px;gap:7px}
+.mini .chip .dot{width:6px;height:6px}
+.mini .ms{margin:10px 0 10px;border-radius:18px;box-shadow:var(--press-s);padding:8px 14px;font:11px/1.6 var(--mono);color:var(--ink)}
+.mini .ms div{white-space:nowrap;overflow:hidden;width:0;animation:type 6s steps(40) infinite}
+.mini .ms div:nth-child(2){animation-name:type2}
+.mini .ms div:nth-child(3){animation-name:type3}
+.mini .mp{height:10px;border-radius:999px;box-shadow:var(--press-s);padding:2px}
+.mini .mp i{display:flex;justify-content:flex-end;align-items:center;height:100%;border-radius:999px;background:var(--s);box-shadow:var(--raise-xs);animation:fill 6s var(--ease) infinite;padding-right:1px}
+.mini .mp i .dot{width:4px;height:4px;box-shadow:none}
+.mini .mp .dot.uv{animation:tA 6s steps(1) infinite}
+.mini .mp .dot.volt{animation:tZ 6s steps(1) infinite;position:absolute;opacity:0}
+@keyframes pop{0%{box-shadow:var(--raise-s)}6%,100%{box-shadow:var(--float)}}
+@keyframes tA{0%,70%{opacity:1}71%,100%{opacity:0}}
+@keyframes tZ{0%,70%{opacity:0}71%,100%{opacity:1}}
+@keyframes type{0%,8%{width:0}28%,100%{width:100%}}
+@keyframes type2{0%,28%{width:0}48%,100%{width:100%}}
+@keyframes type3{0%,48%{width:0}68%,100%{width:100%}}
+@keyframes fill{0%,6%{width:6%}68%{width:88%}71%,100%{width:100%}}
+
+/* step 2 */
+.engines{width:100%;text-align:left;margin-bottom:6px}
+.engines .row .k b{font-weight:600}
+.engines .res{display:block;font:500 12px/1.35 var(--round);color:var(--soft);margin-top:2px}
+.engines .res.ok::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--volt);box-shadow:inset 0 0 0 1px var(--volt-ring);margin-right:6px;vertical-align:1px}
+.engines .st{min-width:120px}
+.engines .field{flex:1;min-width:0}
+.hint{font-size:12px;color:var(--faint);margin-top:6px}
+/* step 4 */
+.try{width:100%;height:110px;margin-top:2px;font-size:15px}
+</style>
+</head>
+<body>
+<div class="wbar" data-tauri-drag-region><i></i><i></i><i></i><span class="t" data-tauri-drag-region>Welcome</span></div>
+<div class="onb">
+  <div class="steps" id="steps"><i>1</i><i>2</i><i>3</i><i>4</i></div>
+
+  <!-- 1 -->
+  <div class="pane" data-step="1">
+    <div class="demo" aria-hidden="true">
+      <div class="sel">In Claude Code you highlighted: <span>fix the login bug on staging, users get kicked out</span></div>
+      <div class="mini">
+        <div class="mt">
+          <span class="logo"><img class="mark" src="mark.svg" alt=""></span>
+          <span class="tt"><b class="a">Maxxing for Claude Code</b><b class="z"><span class="dot volt"></span>Maxxed. Pasted in place.</b></span>
+          <span class="chip"><span class="dot uv"></span>shop · CLAUDE.md</span>
+        </div>
+        <div class="ms"><div>Goal: find why users get signed out of staging.</div><div>Context: shop repo. Run `pnpm test` first.</div><div>1. Reproduce with the test account.</div></div>
+        <div class="mp"><i><span class="dot uv"></span><span class="dot volt"></span></i></div>
+      </div>
+    </div>
+    <h4>promptmaxxer</h4>
+    <div class="tag">Help your output <b>ASCEND</b></div>
+    <p id="welcomeText"></p>
+  </div>
+
+  <!-- 2 -->
+  <div class="pane hidden" data-step="2">
+    <h4>Pick your AI</h4>
+    <p>It runs on an AI you already have. Test one to go on.</p>
+    <div class="grp engines" id="engines"></div>
+    <div class="grp engines" id="keyGrp">
+      <div class="row"><span class="k" style="flex:none;width:118px"><b>Anthropic key</b><small>Pay per use</small></span>
+        <label class="field sm"><input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" aria-label="Anthropic API key"></label>
+        <button class="b xs" id="saveKey">Save</button></div>
+    </div>
+    <div class="hint" id="keyMsg">Get a key at <span class="mono">console.anthropic.com</span>. It is kept in the macOS Keychain, never in a file.</div>
+  </div>
+
+  <!-- 3 -->
+  <div class="pane hidden" data-step="3">
+    <div class="big"><div class="in"><svg viewBox="0 0 56 56"><circle cx="28" cy="12" r="4"/><path d="M11 21l17 3.5L45 21M28 24.5v12M28 36.5l-7.5 12M28 36.5l7.5 12"/></svg></div></div>
+    <h4>Allow Accessibility</h4>
+    <p>promptmaxxer needs it to copy the text you highlight and paste the maxxed prompt back in place. It never sends, posts or presses Enter.</p>
+    <button class="b primary" id="openAx">Open System Settings</button>
+    <div class="live">
+      <span class="k">Accessibility<small>Checked live while this screen is open</small></span>
+      <span class="st" id="axSt"></span>
+    </div>
+  </div>
+
+  <!-- 4 -->
+  <div class="pane hidden" data-step="4">
+    <div class="big"><div class="in"><svg viewBox="0 0 56 56"><path d="M8 22h28M8 34h22"/><path d="M38 14h8M42 14v28M38 42h8"/></svg></div></div>
+    <h4>Try it</h4>
+    <p id="tryText"></p>
+    <textarea class="well-text try selectable" id="try" spellcheck="false">write a launch email for our new app, its for small shops, make it good and not too long</textarea>
+    <div class="live">
+      <span class="k">Your first maxx<small id="tryHint">Waiting for your key press</small></span>
+      <span class="st" id="trySt"></span>
+    </div>
+  </div>
+
+  <div class="navrow">
+    <button class="b ghost" id="back">Back</button>
+    <span id="stepLabel">Step 1 of 4</span>
+    <button class="b sm" id="next">Continue</button>
+  </div>
+</div>
+<script src="shared.js"></script>
+<script>
+(async function () {
+  const { $, $$, esc, invoke, listen, keyCaps } = PMX;
+  let step = Math.min(4, Math.max(1, +(PMX.query.get("step") || 1)));
+  let fastKey = "Alt+Space", maxKey = "Ctrl+Alt+Space", tested = false, ax = false, tried = false, axTimer = null;
+  const tests = {};
+  try { const S = await invoke("get_settings"); fastKey = S.fast_key || fastKey; maxKey = S.max_key || maxKey; } catch (e) {}
+  $("#welcomeText").innerHTML = `Highlight rough text in any app and press ${keyCaps(fastKey, "xs")}. You get a strong prompt that fits the AI it is going to and the project you are in.`;
+  $("#tryText").innerHTML = `Highlight the text below and press ${keyCaps(fastKey, "xs")}. For the full version, press ${keyCaps(maxKey, "xs")}.`;
+
+  const ST_ON = (t) => `<span class="dot volt"></span>${esc(t)}`;
+  const ST_OFF = (t) => `<span class="dot off"></span>${esc(t)}`;
+
+  // ---------- step 2: engines ----------
+  let engines = [];
+  async function loadEngines() { engines = await invoke("list_engines"); renderEngines(); }
+  function renderEngines() {
+    $("#engines").innerHTML = engines.filter((e) => e.id !== "anthropic-key" || e.ready).map((e) => {
+      const t = tests[e.id] || {};
+      const res = t.busy ? '<span class="res">Testing…</span>' : t.text ? `<span class="res ${t.ok ? "ok" : ""}">${esc(t.text)}</span>` : "";
+      return `<div class="row"><span class="k"><b>${esc(e.label)}</b>${res}</span>
+        <span class="st ${e.ready ? "" : "no"}"><span class="dot ${e.ready ? "volt" : "off"}"></span>${esc(e.detail)}</span>
+        <button class="b xs" data-test="${esc(e.id)}" ${e.ready && !t.busy ? "" : "disabled"}>Test</button></div>`;
+    }).join("");
+    const key = engines.find((e) => e.id === "anthropic-key");
+    $("#keyGrp").classList.toggle("hidden", !!(key && key.ready));
+    $("#keyMsg").classList.toggle("hidden", !!(key && key.ready));
+    tested = Object.values(tests).some((t) => t.ok);
+    nav();
+  }
+  async function runTest(id) {
+    tests[id] = { busy: true }; renderEngines();
+    try {
+      const r = await invoke("test_engine", { engine: id });
+      tests[id] = r.ok ? { ok: true, text: `Works · ${(r.ms / 1000).toFixed(1)} s` } : { ok: false, text: r.error || "Test failed." };
+    } catch (e) { tests[id] = { ok: false, text: String(e) }; }
+    renderEngines();
+  }
+  $("#engines").addEventListener("click", (e) => { const b = e.target.closest("[data-test]"); if (b) runTest(b.dataset.test); });
+  $("#saveKey").addEventListener("click", async () => {
+    const v = $("#apikey").value.trim();
+    if (!v) { $("#keyMsg").textContent = "Paste your key first."; return; }
+    const r = await invoke("save_api_key", { provider: "anthropic", key: v });
+    $("#apikey").value = "";
+    $("#keyMsg").textContent = r && r.ok ? "Saved in the macOS Keychain. Testing it now." : (r && r.error) || "Couldn't save the key.";
+    await loadEngines();
+    if (r && r.ok) runTest("anthropic-key");
+  });
+
+  // ---------- step 3: accessibility, checked every second ----------
+  function renderAx() { $("#axSt").className = "st" + (ax ? "" : " no"); $("#axSt").innerHTML = ax ? ST_ON("Granted") : ST_OFF("Waiting"); nav(); }
+  async function pollAx() { try { ax = !!(await invoke("check_accessibility")); } catch (e) {} renderAx(); }
+  $("#openAx").addEventListener("click", () => invoke("open_accessibility_settings"));
+
+  // ---------- step 4: first maxx (the bar reports it through pmx:bar) ----------
+  function renderTry() {
+    $("#trySt").className = "st" + (tried ? "" : " no");
+    $("#trySt").innerHTML = tried ? ST_ON("Maxxed") : ST_OFF("Waiting");
+    $("#tryHint").textContent = tried ? "You're set. It works the same in every app." : "Waiting for your key press";
+  }
+  await listen("pmx:bar", (p) => { if (p && (p.phase === "done" || p.phase === "clipboard")) { tried = true; renderTry(); } });
+
+  // ---------- navigation ----------
+  function nav() {
+    $$("#steps i").forEach((el, i) => { el.className = i + 1 < step ? "done" : i + 1 === step ? "now" : ""; });
+    $("#stepLabel").textContent = `Step ${step} of 4`;
+    $("#back").classList.toggle("inv", step === 1);
+    $("#next").textContent = step === 4 ? "Finish" : "Continue";
+    $("#next").disabled = (step === 2 && !tested) || (step === 3 && !ax);
+  }
+  function show(n) {
+    step = n;
+    $$(".pane").forEach((p) => p.classList.toggle("hidden", +p.dataset.step !== n));
+    clearInterval(axTimer);
+    if (n === 2) loadEngines();
+    if (n === 3) { pollAx(); axTimer = setInterval(pollAx, 1000); }
+    if (n === 4) renderTry();
+    nav();
+  }
+  $("#back").addEventListener("click", () => step > 1 && show(step - 1));
+  $("#next").addEventListener("click", async () => {
+    if (step < 4) return show(step + 1);
+    $("#next").disabled = true;
+    await invoke("finish_onboarding");
+  });
+
+  renderAx(); renderTry(); show(step);
+
+  // browser preview only: ?tested=1 runs the Claude plan test; ?tried=1 fakes the first maxx
+  if (!PMX.LIVE && PMX.query.get("tested")) runTest("claude-plan");
+  if (!PMX.LIVE && PMX.query.get("tried")) PMX.mockEmit("pmx:bar", { phase: "done" });
+})();
+</script>
+</body>
+</html>
