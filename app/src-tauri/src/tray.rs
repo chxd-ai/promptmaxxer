@@ -30,11 +30,11 @@ pub fn build(app: &App) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, e| match e.id.as_ref() {
-            "settings" => {
-                let _ = crate::windows::open(app, "settings");
-            }
-            "history" => {
-                let _ = crate::windows::open(app, "history");
+            id @ ("settings" | "history") => {
+                log(&format!("menu: {id}"));
+                if let Err(e) = crate::windows::open(app, id) {
+                    log(&format!("menu: could not open {id}: {e}"));
+                }
             }
             "quit" => {
                 log("quit: from the menu");

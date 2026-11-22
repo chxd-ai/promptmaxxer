@@ -96,7 +96,9 @@ pub fn run() {
             // PMX_OPEN=settings,history: open these windows at launch without taking the focus (screenshots).
             if let Ok(list) = std::env::var("PMX_OPEN") {
                 for label in list.split(',').map(str::trim).filter(|l| !l.is_empty()) {
-                    let _ = windows::open_with(app.handle(), label, false);
+                    if let Err(e) = windows::open_with(app.handle(), label, std::env::var("PMX_OPEN_FOCUS").is_ok()) {
+                        log::log(&format!("window: could not open {label}: {e}"));
+                    }
                 }
             }
             if !mac::accessibility_trusted() {

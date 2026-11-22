@@ -93,7 +93,8 @@ pub async fn deliver(c: Captured, text: &str) -> Delivery {
         now = mac::front_app();
     }
     let same_app = now.as_ref().is_some_and(|n| n.pid == c.app.pid);
-    if mac::is_terminal(&c.app) || !same_app {
+    let terminal = mac::is_terminal(&c.app) || (mac::is_mixed_terminal_app(&c.app) && mac::focused_is_terminal(c.app.pid));
+    if terminal || !same_app {
         mac::set_clipboard_text(text);
         return Delivery::Clipboard { reason: if same_app { "terminal" } else { "app changed" } };
     }
@@ -118,7 +119,9 @@ mod tests {
     fn terminals_are_clipboard_only() {
         let app = |name: &str, id: &str| AppInfo { name: name.into(), bundle_id: id.into(), pid: 1 };
         assert!(mac::is_terminal(&app("Ghostty", "com.mitchellh.ghostty")));
-        assert!(mac::is_terminal(&app("Orca", "com.stablyai.orca")));
+        // Orca: chat boxes take a paste; only its terminal panes are clipboard-only (checked at paste time).
+        assert!(!mac::is_terminal(&app("Orca", "com.stablyai.orca")));
+        assert!(mac::is_mixed_terminal_app(&app("Orca", "com.stablyai.orca")));
         assert!(mac::is_terminal(&app("Terminal", "com.apple.Terminal")));
         assert!(mac::is_terminal(&app("iTerm2", "com.googlecode.iterm2")));
         assert!(mac::is_terminal(&app("Warp", "dev.warp.Warp-Stable")));

@@ -25,7 +25,7 @@
     const noneReady = q.get("engines") === "none";
     let keySaved = !onlyClaude && !noneReady;
     let settings = {
-      fast_key: "Alt+Space", max_key: "Ctrl+Alt+Space",
+      fast_key: "Alt+Space", max_key: "Ctrl+Shift+Space",
       engine: "auto", engine_fast: null, engine_max: null,
       about_me: "I run a small web studio on a Mac. Plain English, short steps, exact commands. Never push to main without asking.",
       sources: { claude_user: true, codex_user: false, project_files: true },

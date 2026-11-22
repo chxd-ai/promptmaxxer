@@ -146,7 +146,7 @@ body{display:flex;flex-direction:column;min-width:560px}
 (async function () {
   const { $, $$, esc, invoke, listen, keyCaps } = PMX;
   let step = Math.min(4, Math.max(1, +(PMX.query.get("step") || 1)));
-  let fastKey = "Alt+Space", maxKey = "Ctrl+Alt+Space", tested = false, ax = false, tried = false, axTimer = null;
+  let fastKey = "Alt+Space", maxKey = "Ctrl+Shift+Space", tested = false, ax = false, tried = false, axTimer = null;
   const tests = {};
   try { const S = await invoke("get_settings"); fastKey = S.fast_key || fastKey; maxKey = S.max_key || maxKey; } catch (e) {}
   $("#welcomeText").innerHTML = `Highlight rough text in any app and press ${keyCaps(fastKey, "xs")}. You get a strong prompt that fits the AI it is going to and the project you are in.`;

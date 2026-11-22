@@ -48,11 +48,56 @@ pub fn open_with(app: &AppHandle, label: &str, focus: bool) -> tauri::Result<()>
         }
     });
     let _ = win.unminimize();
+    // Put it in front of the person: on the screen under the mouse and on the desktop (Space) they are on now.
+    // Without this, with two screens or a full-screen app, the window opens somewhere out of view and the
+    // menu looks dead.
+    center_on_mouse_screen(app, &win);
     let _ = win.show();
+    let w2 = win.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Ok(ptr) = w2.ns_window() {
+            // SAFETY: a live NSWindow owned by tao, used on the main thread.
+            unsafe {
+                let ns = ptr as *mut objc2::runtime::AnyObject;
+                // moveToActiveSpace (1 << 1) | fullScreenAuxiliary (1 << 8): the window comes to the Space in view
+                // when promptmaxxer is activated, instead of pulling the person to another desktop.
+                let behavior: usize = (1 << 1) | (1 << 8);
+                let _: () = objc2::msg_send![ns, setCollectionBehavior: behavior];
+                if focus {
+                    // A menu bar app is never the active app: activate it, or the window opens behind everything.
+                    let ns_app: *mut objc2::runtime::AnyObject =
+                        objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
+                    let _: () = objc2::msg_send![ns_app, activateIgnoringOtherApps: true];
+                    let _: () = objc2::msg_send![ns, makeKeyAndOrderFront: std::ptr::null::<objc2::runtime::AnyObject>()];
+                } else {
+                    let _: () = objc2::msg_send![ns, orderFrontRegardless];
+                }
+            }
+        }
+    });
     if focus {
         let _ = win.set_focus();
     }
     Ok(())
+}
+
+/// Centre the window on the monitor that holds the mouse pointer.
+fn center_on_mouse_screen(app: &AppHandle, win: &tauri::WebviewWindow) {
+    let Some((mx, my)) = crate::mac::mouse_location() else { return };
+    let Ok(monitors) = app.available_monitors() else { return };
+    for m in monitors {
+        let sf = m.scale_factor();
+        let pos = m.position().to_logical::<f64>(sf);
+        let size = m.size().to_logical::<f64>(sf);
+        if mx >= pos.x && mx < pos.x + size.width && my >= pos.y && my < pos.y + size.height {
+            let Ok(outer) = win.outer_size() else { return };
+            let ws = outer.to_logical::<f64>(win.scale_factor().unwrap_or(sf));
+            let x = pos.x + ((size.width - ws.width) / 2.0).max(0.0);
+            let y = pos.y + ((size.height - ws.height) / 2.0).max(0.0);
+            let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+            return;
+        }
+    }
 }
 
 pub fn close(app: &AppHandle, label: &str) {

@@ -28,9 +28,63 @@ pub fn front_app() -> Option<AppInfo> {
 
 /// Terminals: the selection usually cannot be replaced, so the result goes to the clipboard only (SPEC section 1).
 pub fn is_terminal(app: &AppInfo) -> bool {
-    const IDS: &[&str] = &["com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty", "dev.warp.Warp-Stable", "dev.warp.Warp", "com.stablyai.orca"];
-    const NAMES: &[&str] = &["Terminal", "iTerm2", "iTerm", "Ghostty", "Warp", "Orca"];
+    const IDS: &[&str] = &["com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty", "dev.warp.Warp-Stable", "dev.warp.Warp"];
+    const NAMES: &[&str] = &["Terminal", "iTerm2", "iTerm", "Ghostty", "Warp"];
     IDS.contains(&app.bundle_id.as_str()) || NAMES.contains(&app.name.as_str())
+}
+
+/// Apps that mix chat boxes and terminal panes (Orca). Their chat box takes a normal paste; a terminal pane
+/// (xterm.js, labelled "Terminal input") does not replace the selection.
+pub fn is_mixed_terminal_app(app: &AppInfo) -> bool {
+    app.bundle_id == "com.stablyai.orca" || app.name == "Orca"
+}
+
+/// The focused element of app `pid` is a terminal pane: its Accessibility label or description says "terminal".
+pub fn focused_is_terminal(pid: i32) -> bool {
+    focused_labels(pid).iter().any(|l| l.to_lowercase().contains("terminal"))
+}
+
+fn focused_labels(pid: i32) -> Vec<String> {
+    use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
+    use core_foundation::string::{CFString, CFStringRef};
+    use std::ffi::c_void;
+    type AXUIElementRef = *const c_void;
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
+        fn AXUIElementCopyAttributeValue(e: AXUIElementRef, attr: CFStringRef, value: *mut CFTypeRef) -> i32;
+        fn AXUIElementSetMessagingTimeout(e: AXUIElementRef, secs: f32) -> i32;
+        fn CFGetTypeID(cf: CFTypeRef) -> usize;
+        fn CFStringGetTypeID() -> usize;
+    }
+    let mut out = vec![];
+    unsafe {
+        let app = AXUIElementCreateApplication(pid);
+        if app.is_null() {
+            return out;
+        }
+        AXUIElementSetMessagingTimeout(app, 0.15);
+        let mut focused: CFTypeRef = std::ptr::null();
+        let attr = CFString::from_static_string("AXFocusedUIElement");
+        let ok = AXUIElementCopyAttributeValue(app, attr.as_concrete_TypeRef(), &mut focused) == 0 && !focused.is_null();
+        CFRelease(app as CFTypeRef);
+        if !ok {
+            return out;
+        }
+        for name in ["AXDescription", "AXTitle", "AXRoleDescription"] {
+            let attr = CFString::new(name);
+            let mut v: CFTypeRef = std::ptr::null();
+            if AXUIElementCopyAttributeValue(focused as AXUIElementRef, attr.as_concrete_TypeRef(), &mut v) == 0 && !v.is_null() {
+                if CFGetTypeID(v) == CFStringGetTypeID() {
+                    out.push(CFString::wrap_under_create_rule(v as CFStringRef).to_string());
+                } else {
+                    CFRelease(v);
+                }
+            }
+        }
+        CFRelease(focused);
+    }
+    out
 }
 
 /// Everything on the general pasteboard: each item with each of its types and bytes.
