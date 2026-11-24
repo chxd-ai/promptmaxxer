@@ -68,26 +68,39 @@ pub fn apply(app: &AppHandle, fast: &str, max: &str) -> Result<(), String> {
         return Err("The fast and max keys must differ.".into());
     }
     let gs = app.global_shortcut();
-    if let Some((of, om)) = KEYS.lock().unwrap().take() {
+    let old = KEYS.lock().unwrap().take();
+    if let Some((of, om)) = old {
         let _ = gs.unregister(of);
         let _ = gs.unregister(om);
     }
     let mut errs = vec![];
+    let mut done = vec![];
     for (name, k) in [(fast, f), (max, m)] {
         match gs.register(k) {
-            Ok(()) => log(&format!("keys: registered {name}")),
+            Ok(()) => {
+                log(&format!("keys: registered {name}"));
+                done.push(k);
+            }
             Err(e) => {
                 log(&format!("keys: could not register {name}: {e}"));
                 errs.push(format!("{name}: {e}"));
             }
         }
     }
-    *KEYS.lock().unwrap() = Some((f, m));
     if errs.is_empty() {
-        Ok(())
-    } else {
-        Err(errs.join("; "))
+        *KEYS.lock().unwrap() = Some((f, m));
+        return Ok(());
     }
+    // Roll back: drop the half-set new pair and put the old pair back on.
+    for k in done {
+        let _ = gs.unregister(k);
+    }
+    if let Some((of, om)) = old {
+        let ok = gs.register(of).is_ok() & gs.register(om).is_ok();
+        log(&format!("keys: rolled back to the old keys ({})", if ok { "ok" } else { "failed" }));
+        *KEYS.lock().unwrap() = Some((of, om));
+    }
+    Err(errs.join("; "))
 }
 
 /// Esc on while busy, off after.

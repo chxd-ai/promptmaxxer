@@ -297,7 +297,8 @@ async fn run_press(level0: Level) {
     };
     let result = loop {
         let req = Request {
-            draft: captured.draft.clone(),
+            // Keys and passwords in the selection never leave the Mac (SPEC section 9).
+            draft: pmx_context::scrub_secrets(&captured.draft),
             level,
             app_name: front.name.clone(),
             target: ctx.target.hint(),
@@ -399,18 +400,23 @@ pub fn rerun(item: serde_json::Value, level: Level) {
             }
         };
         let t0 = Instant::now();
-        let req = Request { draft: draft.clone(), level, app_name: app_name.clone(), target: target.clone(), context_brief: None, framework };
+        let req = Request { draft: pmx_context::scrub_secrets(&draft), level, app_name: app_name.clone(), target: target.clone(), context_brief: None, framework };
         match stream(&app, engine, req, &base).await {
             Ok(out) => {
                 mac::set_clipboard_text(&out.text);
                 let ms = t0.elapsed().as_millis() as u64;
                 if s.history {
                     let project = str_of("project");
-                    history::append(&history::Row {
+                    let id = history::append(&history::Row {
                         app: &app_name, level: level_str(level), engine: out.engine.as_str(), model: Some(&out.model), ms, ok: true,
                         retried: Some(out.retried), draft: &draft, output: Some(&out.text), error: None, target: Some(&label),
                         target_hint: target.as_deref(), project: Some(project.as_str()).filter(|p| !p.is_empty()),
                     });
+                    // Bar thumbs rate the last row: point them at this re-run, not the press before it.
+                    if let Some(front) = mac::front_app() {
+                        *LAST.lock().unwrap() =
+                            Some(Last { history_id: id, app: front, draft: draft.clone(), delivery: Delivery::Clipboard { reason: "re-run" } });
+                    }
                 }
                 log(&format!("rerun: ok engine={} level={} ms={ms}", out.engine.as_str(), level_str(level)));
                 bar::emit(&app, &Payload { phase: "clipboard", text: out.text, message: selection::MSG_CLIPBOARD.into(), ms, ..base });

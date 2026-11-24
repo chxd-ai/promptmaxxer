@@ -131,7 +131,15 @@ select.pick{min-width:170px}
   function save() {
     clearTimeout(saveT);
     saveT = setTimeout(async () => {
-      await invoke("save_settings", { settings: S });
+      try { await invoke("save_settings", { settings: S }); }
+      catch (e) {
+        // Show why it was not saved, and put the saved keys back on screen.
+        $("#saved").textContent = String(e); $("#saved").classList.add("show"); clearTimeout(savedT);
+        savedT = setTimeout(() => $("#saved").classList.remove("show"), 6000);
+        S = await invoke("get_settings"); renderKeys();
+        return;
+      }
+      $("#saved").innerHTML = '<span class="dot volt"></span>Saved';
       $("#saved").classList.add("show"); clearTimeout(savedT);
       savedT = setTimeout(() => $("#saved").classList.remove("show"), 1600);
     }, 250);

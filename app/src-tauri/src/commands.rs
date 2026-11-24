@@ -16,12 +16,12 @@ pub fn get_settings() -> Settings {
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     let old = settings::load();
-    settings::save(&settings).map_err(|e| format!("Couldn't save the settings: {e}"))?;
+    // Set the keys first: a pair that cannot be set is never saved, and the old keys stay on.
     if old.fast_key != settings.fast_key || old.max_key != settings.max_key {
-        if let Err(e) = crate::keys::apply(&app, &settings.fast_key, &settings.max_key) {
-            return Err(format!("Saved, but a key could not be set: {e}"));
-        }
+        crate::keys::apply(&app, &settings.fast_key, &settings.max_key)
+            .map_err(|e| format!("Not saved. That shortcut could not be set: {e}"))?;
     }
+    settings::save(&settings).map_err(|e| format!("Couldn't save the settings: {e}"))?;
     if old.start_at_login != settings.start_at_login {
         let al = app.autolaunch();
         let r = if settings.start_at_login { al.enable() } else { al.disable() };

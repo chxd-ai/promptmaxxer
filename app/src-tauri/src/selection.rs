@@ -13,6 +13,15 @@ pub const PASTE_SETTLE: Duration = Duration::from_millis(300);
 const MODIFIER_WAIT: Duration = Duration::from_secs(3);
 const POLL: Duration = Duration::from_millis(15);
 
+/// A copy-on-select copy this recent counts as the selection.
+const COPY_ON_SELECT_MAX_AGE: Duration = Duration::from_secs(60);
+
+/// Terminal panes may run Claude Code's fullscreen view, which copies on select. Orca chat boxes do not count:
+/// there a press with nothing selected must not paste an old clipboard at the cursor.
+fn copy_on_select_app(app: &AppInfo) -> bool {
+    mac::is_terminal(app) || (mac::is_mixed_terminal_app(app) && mac::focused_is_terminal(app.pid))
+}
+
 pub const MSG_NOTHING: &str = "Highlight some text first.";
 pub const MSG_FAILED: &str = "Couldn't maxx this one. Your text is unchanged.";
 pub const MSG_CLIPBOARD: &str = "Maxxed. It's on your clipboard.";
@@ -24,6 +33,8 @@ pub struct Captured {
     pub app: AppInfo,
     pub draft: String,
     saved: SavedClipboard,
+    /// Clipboard change count right after our Cmd+C. A different count later means the user copied something.
+    copied_count: isize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -69,18 +80,30 @@ pub async fn capture() -> Result<Captured, CaptureError> {
         log(&format!("capture: Cmd+C failed: {e}"));
     }
     let copied = wait_until(COPY_TIMEOUT, || mac::change_count() != before).await;
-    let draft = if copied { mac::clipboard_text().unwrap_or_default() } else { String::new() };
+    let mut draft = if copied { mac::clipboard_text().unwrap_or_default() } else { String::new() };
+    if !copied && copy_on_select_app(&app) && mac::copied_elsewhere_within(COPY_ON_SELECT_MAX_AGE) {
+        // Claude Code's fullscreen view copies on select and leaves no terminal selection for Cmd+C:
+        // the selection is the text it just put on the clipboard.
+        draft = mac::clipboard_text().unwrap_or_default();
+        log(&format!("capture: Cmd+C copied nothing, using the copy-on-select clipboard ({} chars)", draft.chars().count()));
+    }
     if draft.trim().is_empty() {
         if copied {
             mac::restore_clipboard(&saved);
         }
+        log(&format!("capture: nothing selected (Cmd+C changed clipboard: {copied}, app: {})", app.name));
         return Err(CaptureError::NothingSelected);
     }
-    Ok(Captured { app, draft, saved })
+    Ok(Captured { app, draft, saved, copied_count: mac::change_count() })
 }
 
+/// Put the old clipboard back, unless the user copied something new since the press.
 pub fn abandon(c: Captured) {
-    mac::restore_clipboard(&c.saved);
+    if mac::change_count() == c.copied_count {
+        mac::restore_clipboard(&c.saved);
+    } else {
+        log("abandon: clipboard changed during the run, keeping the new copy");
+    }
 }
 
 pub async fn deliver(c: Captured, text: &str) -> Delivery {
@@ -99,6 +122,9 @@ pub async fn deliver(c: Captured, text: &str) -> Delivery {
         return Delivery::Clipboard { reason: if same_app { "terminal" } else { "app changed" } };
     }
     wait_until(Duration::from_secs(1), || !mac::modifiers_held()).await;
+    // Something copied during the run is the clipboard to give back, not the one from before the press.
+    let user_copied = mac::change_count() != c.copied_count;
+    let restore = if user_copied { mac::save_clipboard() } else { c.saved };
     mac::set_clipboard_text(text);
     if let Err(e) = mac::cmd_key(mac::KEY_V) {
         // The result is on the clipboard; keep it there rather than restoring over it.
@@ -107,7 +133,7 @@ pub async fn deliver(c: Captured, text: &str) -> Delivery {
     }
     // Let the app read the pasteboard before the old contents go back.
     tokio::time::sleep(PASTE_SETTLE).await;
-    mac::restore_clipboard(&c.saved);
+    mac::restore_clipboard(&restore);
     Delivery::Pasted
 }
 

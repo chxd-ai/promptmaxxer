@@ -66,7 +66,7 @@ pub fn run(args: &[String]) -> i32 {
         ctx.chip,
         brief.as_ref().map(|b| format!("{} words", b.split_whitespace().count())).unwrap_or_else(|| "none".into())
     );
-    let req = Request { draft: raw.clone(), level, app_name: app.clone(), target, context_brief: brief, framework };
+    let req = Request { draft: pmx_context::scrub_secrets(&raw), level, app_name: app.clone(), target, context_brief: brief, framework };
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let result = rt.block_on(pmx_engines::run(engine, req, tx, tokio_util::sync::CancellationToken::new()));
     let mut stdout = std::io::stdout();

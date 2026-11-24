@@ -51,6 +51,10 @@ fn rules() -> &'static Rules {
             r"\beyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}",
             // Bearer tokens in pasted headers.
             r"(?i)\bbearer\s+[A-Za-z0-9\-._~+/]{20,}=*",
+            // Basic auth in pasted headers.
+            r"(?i)\bbasic\s+[A-Za-z0-9+/]{12,}=*",
+            // ClickUp personal tokens.
+            r"\bpk_\d+_[A-Za-z0-9]{20,}\b",
         ]
         .iter()
         .map(|p| Regex::new(p).expect("secret regex"))
@@ -66,7 +70,7 @@ fn rules() -> &'static Rules {
             .unwrap(),
             // KEY=value   export TOKEN=value   password: value   - secret: value
             line_assign: Regex::new(
-                r#"(?m)^(?P<pre>[ \t]*(?:[-*][ \t]+)?(?:export[ \t]+)?(?P<name>[A-Za-z_][A-Za-z0-9_.\-]*)[ \t]*(?:=|:)[ \t]*)(?P<val>[^\s"'`][^\r\n]*?)[ \t]*$"#,
+                r#"(?m)^(?P<pre>[ \t]*(?:[-*][ \t]+)?(?:export[ \t]+)?[`*]*(?P<name>[A-Za-z_][A-Za-z0-9_.\-]*)[`*]*[ \t]*(?P<op>=|:)[`*]*[ \t]*)(?P<val>[^\s"'`][^\r\n]*?)[ \t]*$"#,
             )
             .unwrap(),
         }
@@ -110,6 +114,12 @@ fn words(name: &str) -> Vec<String> {
         out.push(cur);
     }
     out
+}
+
+/// True when a name says it holds a password (not just a key or token).
+fn password_name(name: &str) -> bool {
+    let low = name.to_lowercase();
+    ["password", "passwd", "passphrase"].iter().any(|w| low.contains(w)) || words(name).iter().any(|w| w == "pwd" || w == "pin")
 }
 
 /// True when the value is clearly not a literal secret: empty, a number, a bool,
@@ -178,7 +188,13 @@ pub fn scrub_secrets(text: &str) -> String {
         .line_assign
         .replace_all(&out, |c: &Captures| {
             let (name, val) = (&c["name"], &c["val"]);
-            if secret_name(name) && !harmless_value(val) {
+            let v = val.trim();
+            // Passwords can be all digits, and `NAME=a few words` in an env file is a passphrase, not prose.
+            let pw_override = password_name(name)
+                && v != SECRET_MARK
+                && (v.chars().all(|ch| ch.is_ascii_digit()) && v.len() >= 4
+                    || (&c["op"] == "=" && !c["pre"].ends_with(' ') && v.split_whitespace().count() > 1));
+            if pw_override || (secret_name(name) && !harmless_value(val)) {
                 format!("{}{}", &c["pre"], SECRET_MARK)
             } else {
                 c[0].to_string()
@@ -201,6 +217,23 @@ mod tests {
         let out = scrub_secrets(input);
         assert!(!out.contains(secret), "secret survived in: {out}");
         assert!(out.contains(SECRET_MARK), "no mark in: {out}");
+    }
+
+    #[test]
+    fn common_forms_from_notes_files() {
+        let k = format!("k{}", rep('q', 30));
+        gone(&format!("- `OPENAI_API_KEY`: {k}"), &k);
+        gone(&format!("**Password:** Tr0ub{}", rep('x', 8)), &format!("Tr0ub{}", rep('x', 8)));
+        gone("DB_PASSWORD=84726193", "84726193");
+        gone("password: 20261122", "20261122");
+        gone("MINI_PASSWORD=correct horse battery staple", "correct horse");
+        let basic = format!("Authorization: Basic {}==", rep('Q', 24));
+        gone(&basic, &rep('Q', 24));
+        let pk = format!("pk_12345678_{}", rep('A', 32));
+        gone(&format!("use {pk}"), &pk);
+        // Prose about where a password lives stays.
+        assert_eq!(scrub_secrets("password: see 1Password"), "password: see 1Password");
+        assert_eq!(scrub_secrets("max_tokens: 4096"), "max_tokens: 4096");
     }
 
     #[test]

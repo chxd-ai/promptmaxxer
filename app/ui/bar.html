@@ -128,7 +128,8 @@ body{padding:14px 26px 26px 14px}
     $("#pdot").className = "dot " + (fin ? "volt" : "uv");
     $("#pdot").style.visibility = w ? "visible" : "hidden";
     // hints
-    $("#escLabel").textContent = fin || bad ? "Close" : "Cancel";
+    // After a run Esc is handed back to your app, so only show it while it can cancel.
+    $("#hEsc").classList.toggle("hidden", fin || bad);
     $("#hUndo").classList.toggle("hidden", !(phase === "done"));
     $("#hMax").classList.toggle("hidden", fin || bad);
     $("#up").disabled = $("#down").disabled = !fin;

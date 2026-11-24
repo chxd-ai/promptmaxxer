@@ -53,19 +53,31 @@ fn head(s: &str, n: usize) -> &str {
     }
 }
 
+/// True when `re` finds a phrase in `text` that the draft itself does not contain.
+/// A draft about Promptmaxxer, drafts or rewriting makes a good rewrite repeat those words;
+/// that echo is not a comment.
+fn new_match(re: &Regex, text: &str, draft_lower: &str) -> bool {
+    re.find_iter(text).any(|m| !draft_lower.contains(&m.as_str().to_lowercase()))
+}
+
 /// True for refusals, meta comments and empty or tiny outputs.
 pub fn looks_bad(out: &str, draft: &str) -> bool {
     if out.is_empty() || out.chars().count() < 20.min(draft.chars().count()) {
         return true;
     }
-    if ALWAYS_BAD.is_match(out) || out.contains("<draft>") {
+    let d = draft.to_lowercase();
+    if new_match(&ALWAYS_BAD, out, &d) || (out.contains("<draft>") && !draft.contains("<draft>")) {
+        return true;
+    }
+    // Claude Code tells the model its scratch folder; a rewrite that copies it in is broken.
+    if ["/tmp/promptmaxxer-run", "/private/tmp/claude-"].iter().any(|p| out.contains(p) && !draft.contains(p)) {
         return true;
     }
     let first = head(out, 400);
-    if ROLE_TALK.is_match(first) {
+    if new_match(&ROLE_TALK, first, &d) {
         return true;
     }
-    REFUSAL_START.is_match(out) && JOB_TALK.is_match(first)
+    REFUSAL_START.is_match(out) && new_match(&JOB_TALK, first, &d)
 }
 
 #[cfg(test)]
@@ -150,6 +162,25 @@ mod tests {
         // A fenced refusal stays a refusal.
         let fenced = clean("```\nI'm sorry, I can't rewrite this draft.\n```");
         assert!(looks_bad(&fenced, DRAFT));
+    }
+
+    #[test]
+    fn words_echoed_from_the_draft_are_not_comments() {
+        let d = "how can we make promptmaxxer better?";
+        assert!(!looks_bad("Help me make Promptmaxxer better. Give me a ranked list of changes.", d));
+        // Role talk that the draft does not contain is still a comment.
+        assert!(looks_bad("I'm going to hold to my role here, Promptmaxxer only rewrites.", "fix the login page now"));
+        let d2 = "the user list page does not load, fix it";
+        assert!(!looks_bad("The user list page does not load. Find the cause and fix it.", d2));
+        assert!(looks_bad("The user wants the list page fixed.", "list page does not load, fix it"));
+        let d3 = "can't get the draft rewriter to save, fix it";
+        assert!(!looks_bad("I can't get the draft rewriter to save. Find the cause and fix it.", d3));
+    }
+
+    #[test]
+    fn scratch_folder_in_output_is_bad() {
+        assert!(looks_bad("Work in /private/tmp/promptmaxxer-run and fix the login page bug.", DRAFT));
+        assert!(looks_bad("Fix the login page. Notes go in /private/tmp/claude-501/x/scratchpad.", DRAFT));
     }
 
     #[test]

@@ -64,11 +64,18 @@ def looks_bad(out: str, draft: str) -> bool:
     """Deterministic guard: refusals, meta comments and empty or tiny outputs."""
     if not out or len(out) < min(20, len(draft)):
         return True
-    if ALWAYS_BAD.match(out) or "<draft>" in out:
+    d = draft.lower()
+
+    def new_match(rx, text):
+        # Words the draft itself uses (e.g. "Promptmaxxer", "draft") are an echo, not a comment.
+        return any(m.group(0).lower() not in d for m in rx.finditer(text))
+
+    m = ALWAYS_BAD.match(out)
+    if (m and m.group(0).strip().lower() not in d) or ("<draft>" in out and "<draft>" not in draft):
         return True
-    if ROLE_TALK.search(out[:400]):
+    if new_match(ROLE_TALK, out[:400]):
         return True
-    return bool(REFUSAL_START.match(out) and JOB_TALK.search(out[:400]))
+    return bool(REFUSAL_START.match(out) and new_match(JOB_TALK, out[:400]))
 
 
 def enhance(draft: str, level: str, app: str, model: str, framework: Path, effort: str = "",

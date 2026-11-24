@@ -113,7 +113,10 @@ fn item(v: &Value) -> Value {
     let s = |k: &str| v.get(k).cloned().unwrap_or(Value::Null);
     json!({
         "id": s("id"), "ts": s("ts"), "app": s("app"), "level": s("level"),
-        "engine": v.get("engine").cloned().unwrap_or(json!("claude-plan")),
+        "engine": v.get("engine").cloned().unwrap_or_else(|| {
+            // Rows from the old Python runner have no engine; it called the API with a key.
+            if model.starts_with("claude-") { json!("anthropic-key") } else { json!("") }
+        }),
         "model": model, "ms": s("ms"), "ok": v.get("ok").and_then(Value::as_bool).unwrap_or(false),
         "draft": s("draft"), "output": v.get("output").cloned().filter(|o| !o.is_null()).unwrap_or(json!("")),
         "target": s("target"), "project": s("project"), "thumb": s("thumb"),

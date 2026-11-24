@@ -74,6 +74,7 @@ pub fn run() {
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             press::set_app(app.handle().clone());
+            mac::start_clipboard_watch();
             tray::build(app)?;
             bar::create(app.handle())?;
             let s = settings::load();

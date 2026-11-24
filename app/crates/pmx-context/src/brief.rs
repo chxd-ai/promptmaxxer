@@ -10,8 +10,9 @@ use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Max words in a brief.
-pub const BRIEF_MAX_WORDS: usize = 300;
+/// Max words in a brief. The prompt asks for 300; the hard cap leaves room so the model's
+/// usual 330 to 420 words are not cut off mid-section.
+pub const BRIEF_MAX_WORDS: usize = 450;
 /// Max bytes of source text handed to `summarize` (user-level and earlier files are trimmed first).
 pub const SOURCE_TEXT_CAP: usize = 40_000;
 const FILE_READ_CAP: u64 = 256 * 1024;
@@ -26,12 +27,12 @@ A prompt writer reads the brief to write better prompts for this person and proj
 Rules:
 - Facts only, taken from the files. Never add, guess or explain.
 - Keep exact paths, commands, file names, branch names, URLs, product and people names word for word.
-- Cover, in this order, only what the files give: what the project is; stack and tools; key commands (build, test, run, deploy); \
-rules the person wants agents to follow; live, risky or protected areas (production, client data, things that must not change or must be asked first).
+- Cover, in this order, only what the files give: live, risky or protected areas (production, client data, things that must not change \
+or must be asked first); what the project is; stack and tools; key commands (build, test, run, deploy); rules the person wants agents to follow.
 - Later and closer files win: when two files disagree, keep the one that appears later.
 - Skip greetings, history, style advice for chat replies, and anything that does not change how a prompt should be written.
 - Never include keys, tokens, passwords or other secrets. Text shown as [secret removed] stays removed; do not mention it.
-- Plain short lines starting with \"- \", grouped under these headings when they have content: Project, Stack, Commands, Rules, Live and risky.
+- Plain short lines starting with \"- \", grouped under these headings when they have content: Live and risky, Project, Stack, Commands, Rules.
 - Max 300 words. Output only the brief.";
 
 /// Where briefs are cached: `~/.local/share/promptmaxxer/briefs/`.
@@ -64,10 +65,15 @@ fn sha256_hex(s: &str) -> String {
     hex(&Sha256::digest(s.as_bytes()))
 }
 
-/// Cache file for a project: `<dir>/<sha256 of root>.json`. Without a project the key is the
-/// empty string (the user-level brief).
-pub(crate) fn cache_path(dir: &Path, project: Option<&Project>) -> PathBuf {
-    let key = project.map(|p| p.root.to_string_lossy().into_owned()).unwrap_or_default();
+/// Cache file for a project and its source list: `<dir>/<sha256 of root + source paths>.json`.
+/// Coding apps also read the user-level files and chat apps do not, so each set gets its own file
+/// instead of overwriting the other's. Without a project the root part is empty.
+pub(crate) fn cache_path(dir: &Path, project: Option<&Project>, srcs: &[Source]) -> PathBuf {
+    let mut key = project.map(|p| p.root.to_string_lossy().into_owned()).unwrap_or_default();
+    for s in srcs {
+        key.push('\0');
+        key.push_str(&s.path.to_string_lossy());
+    }
     dir.join(format!("{}.json", sha256_hex(&key)))
 }
 
@@ -99,7 +105,7 @@ where
         return None;
     }
     let fp = brief_fingerprint(&srcs, about);
-    let file = cache_path(cache_dir, project);
+    let file = cache_path(cache_dir, project, &srcs);
     if let Some(c) = read_cache(&file) {
         if c.fingerprint == fp && !c.text.trim().is_empty() {
             return Some(Brief { text: c.text, sources: srcs, fingerprint: fp, cached: true });
@@ -124,12 +130,13 @@ where
 
 /// The last saved brief text for a project, whatever its fingerprint. For use while a fresh
 /// brief is being built in the background. `None` when nothing was ever saved.
-pub fn cached_brief_text(project: Option<&Project>) -> Option<String> {
-    cached_brief_text_in(&default_cache_dir(), project)
+pub fn cached_brief_text(project: Option<&Project>, prefs: &SourcePrefs) -> Option<String> {
+    cached_brief_text_in(&default_cache_dir(), project, prefs)
 }
 
-pub fn cached_brief_text_in(cache_dir: &Path, project: Option<&Project>) -> Option<String> {
-    read_cache(&cache_path(cache_dir, project)).map(|c| c.text).filter(|t| !t.trim().is_empty())
+pub fn cached_brief_text_in(cache_dir: &Path, project: Option<&Project>, prefs: &SourcePrefs) -> Option<String> {
+    let srcs = sources(project, prefs);
+    read_cache(&cache_path(cache_dir, project, &srcs)).map(|c| c.text).filter(|t| !t.trim().is_empty())
 }
 
 fn read_cache(file: &Path) -> Option<CacheFile> {
@@ -221,7 +228,10 @@ pub(crate) fn cap_words(s: &str, max: usize) -> String {
             in_word = true;
             count += 1;
             if count > max {
-                return s[..i].trim_end().to_string();
+                // Cut at the last whole line, so no half line or lone "-" is left.
+                let cut = &s[..i];
+                let cut = cut.rfind('\n').map_or(cut, |nl| &cut[..nl]);
+                return cut.trim_end().to_string();
             }
         }
     }
@@ -298,7 +308,7 @@ mod tests {
 
         // Cache file is mode 600 and its folder 700.
         use std::os::unix::fs::PermissionsExt;
-        let file = cache_path(&cache, Some(&p));
+        let file = cache_path(&cache, Some(&p), &sources(Some(&p), &project_prefs()));
         assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(fs::metadata(&cache).unwrap().permissions().mode() & 0o777, 0o700);
         assert!(file.file_name().unwrap().to_string_lossy().len() == 64 + 5);
@@ -341,7 +351,7 @@ mod tests {
         assert!(!seen.borrow().contains(&key), "secret sent to summarize");
         assert!(seen.borrow().contains(SECRET_MARK));
         assert!(!b.text.contains(&key), "secret in brief");
-        let raw = fs::read_to_string(cache_path(&cache, Some(&p))).unwrap();
+        let raw = fs::read_to_string(cache_path(&cache, Some(&p), &sources(Some(&p), &project_prefs()))).unwrap();
         assert!(!raw.contains(&key), "secret in cache file");
     }
 
@@ -362,11 +372,11 @@ mod tests {
         fs::write(p.root.join("AGENTS.md"), "- x").unwrap();
         assert!(block_on(brief_in(&cache, Some(&p), &project_prefs(), &summarize)).is_none());
         assert_eq!(calls.get(), 1);
-        assert!(!cache_path(&cache, Some(&p)).exists(), "failure not cached");
+        assert!(!cache_path(&cache, Some(&p), &sources(Some(&p), &project_prefs())).exists(), "failure not cached");
     }
 
     #[test]
-    fn brief_capped_at_300_words() {
+    fn brief_capped_at_max_words() {
         let (tmp, p) = project_with(&[("CLAUDE.md", "- x")]);
         let long: String = (0..500).map(|i| format!("w{i}")).collect::<Vec<_>>().join(" ");
         let summarize = |_t: String| {
@@ -374,8 +384,8 @@ mod tests {
             async move { Some(long) }
         };
         let b = block_on(brief_in(&tmp.path().join("b"), Some(&p), &project_prefs(), &summarize)).unwrap();
-        assert_eq!(b.text.split_whitespace().count(), 300);
-        assert!(b.text.ends_with("w299"));
+        assert_eq!(b.text.split_whitespace().count(), BRIEF_MAX_WORDS);
+        assert!(b.text.ends_with(&format!("w{}", BRIEF_MAX_WORDS - 1)));
     }
 
     #[test]
@@ -383,6 +393,8 @@ mod tests {
         assert_eq!(cap_words("- a b\n- c d\n- e", 3), "- a b");
         assert_eq!(cap_words("one two\nthree", 3), "one two\nthree");
         assert_eq!(cap_words("", 3), "");
+        // A cut mid-line goes back to the end of the last whole line.
+        assert_eq!(cap_words("- a b c\n- d e", 5), "- a b c");
     }
 
     #[test]
@@ -422,12 +434,12 @@ mod tests {
     fn stale_text_stays_readable_after_the_files_change() {
         let (tmp, p) = project_with(&[("CLAUDE.md", "- Build: cargo build")]);
         let cache = tmp.path().join("briefs");
-        assert_eq!(cached_brief_text_in(&cache, Some(&p)), None);
+        assert_eq!(cached_brief_text_in(&cache, Some(&p), &project_prefs()), None);
         let prefs = project_prefs();
         let _ = block_on(brief_in(&cache, Some(&p), &prefs, |_| async { Some("- Build: cargo build".to_string()) })).unwrap();
         fs::write(p.root.join("CLAUDE.md"), "- Build: make").unwrap();
         // Fingerprint changed and the summarizer gives nothing: no fresh brief, the old text is still there.
         assert!(block_on(brief_in(&cache, Some(&p), &prefs, |_| async { None })).is_none());
-        assert_eq!(cached_brief_text_in(&cache, Some(&p)).as_deref(), Some("- Build: cargo build"));
+        assert_eq!(cached_brief_text_in(&cache, Some(&p), &project_prefs()).as_deref(), Some("- Build: cargo build"));
     }
 }

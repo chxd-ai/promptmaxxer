@@ -100,6 +100,46 @@ pub fn change_count() -> isize {
     NSPasteboard::generalPasteboard().changeCount()
 }
 
+// Clipboard watch. Some apps copy on select (Claude Code's fullscreen view runs `pbcopy` on mouse release and
+// has no terminal selection, so our Cmd+C copies nothing). To use that copy, we must know when the clipboard
+// last changed and whether the change was ours.
+struct ClipWatch {
+    count: isize,
+    at: std::time::Instant,
+    own: bool,
+}
+static CLIP_WATCH: std::sync::Mutex<Option<ClipWatch>> = std::sync::Mutex::new(None);
+
+fn clip_note(own: bool) {
+    let count = change_count();
+    let mut g = CLIP_WATCH.lock().unwrap();
+    match g.as_mut() {
+        Some(w) if w.count == count => {}
+        _ => *g = Some(ClipWatch { count, at: std::time::Instant::now(), own }),
+    }
+}
+
+/// Poll the clipboard change count 4 times a second, from app start.
+pub fn start_clipboard_watch() {
+    clip_note(true); // whatever is on the clipboard at start is old
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        clip_note(false);
+    });
+}
+
+/// The clipboard was changed by another app (not by promptmaxxer) less than `max` ago.
+pub fn copied_elsewhere_within(max: std::time::Duration) -> bool {
+    clip_note(false);
+    CLIP_WATCH.lock().unwrap().as_ref().is_some_and(|w| !w.own && w.at.elapsed() <= max)
+}
+
+/// Remember the current clipboard as our own write.
+fn clip_mark_own() {
+    let count = change_count();
+    *CLIP_WATCH.lock().unwrap() = Some(ClipWatch { count, at: std::time::Instant::now(), own: true });
+}
+
 pub fn save_clipboard() -> SavedClipboard {
     autoreleasepool(|_| {
         let pb = NSPasteboard::generalPasteboard();
@@ -124,6 +164,7 @@ pub fn restore_clipboard(saved: &SavedClipboard) {
         let pb = NSPasteboard::generalPasteboard();
         pb.clearContents();
         if saved.0.is_empty() {
+            clip_mark_own();
             return;
         }
         let items: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = saved
@@ -138,7 +179,8 @@ pub fn restore_clipboard(saved: &SavedClipboard) {
             })
             .collect();
         pb.writeObjects(&NSArray::from_retained_slice(&items));
-    })
+    });
+    clip_mark_own();
 }
 
 pub fn clipboard_text() -> Option<String> {
@@ -151,12 +193,14 @@ pub fn clipboard_text() -> Option<String> {
 }
 
 pub fn set_clipboard_text(text: &str) -> bool {
-    autoreleasepool(|_| {
+    let ok = autoreleasepool(|_| {
         let pb = NSPasteboard::generalPasteboard();
         pb.clearContents();
         let t = unsafe { NSPasteboardTypeString };
         pb.setString_forType(&NSString::from_str(text), t)
-    })
+    });
+    clip_mark_own();
+    ok
 }
 
 pub const KEY_C: CGKeyCode = 8; // kVK_ANSI_C

@@ -35,6 +35,7 @@ pub(crate) struct Sse {
     pub text: String,
     pub error: Option<String>,
     pub stopped: bool,
+    pub stop_reason: Option<String>,
 }
 
 impl Sse {
@@ -55,6 +56,11 @@ impl Sse {
                     let t = v["delta"]["text"].as_str().unwrap_or("").to_string();
                     self.text.push_str(&t);
                     out.push(t);
+                }
+                Some("message_delta") => {
+                    if let Some(r) = v["delta"]["stop_reason"].as_str() {
+                        self.stop_reason = Some(r.to_string());
+                    }
                 }
                 Some("message_stop") => self.stopped = true,
                 Some("error") => {
@@ -133,6 +139,13 @@ pub(crate) async fn call(
         }
         if sse.text.trim().is_empty() {
             return Err(EngineError::Http("Anthropic API returned no text".into()));
+        }
+        // A stream that ends early, or a reply cut at the token limit, is half a prompt: never paste it.
+        if !sse.stopped {
+            return Err(EngineError::Http("Anthropic API stream ended early".into()));
+        }
+        if sse.stop_reason.as_deref() == Some("max_tokens") {
+            return Err(EngineError::Http("The answer hit the length limit and was cut off".into()));
         }
         Ok(sse.text)
     };

@@ -122,7 +122,7 @@ pub async fn brief_now(ctx: &PressContext, engine: Option<EngineId>) -> (Option<
     }
     // The last saved brief, but only while the project may be read at all.
     let allowed = ctx.project.is_none() || ctx.sources.iter().any(|s| s.level == pmx_context::SourceLevel::Project);
-    let stale = if allowed { pmx_context::cached_brief_text(ctx.project.as_ref()) } else { None };
+    let stale = if allowed { pmx_context::cached_brief_text(ctx.project.as_ref(), &ctx.prefs) } else { None };
     (stale, false)
 }
 
