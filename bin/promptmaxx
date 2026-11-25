@@ -49,29 +49,33 @@ def clean(text: str) -> str:
 
 
 # Openers that are always a comment, never a prompt.
-ALWAYS_BAD = re.compile(r"\A\s*(I'?m Promptmaxxer|As Promptmaxxer|The user|The draft|This draft|Here(?:'s| is) (?:the|your|a|an) "
+ALWAYS_BAD = re.compile(r"\A\s*(I'?m Prompt[ -]?maxxer|As Prompt[ -]?maxxer|The user|The draft|This draft|Here(?:'s| is) (?:the|your|a|an) "
                         r"(?:rewritten|improved|enhanced|better|stronger)|I'?ll rewrite|I need the draft)", re.I)
 # Refusal openers. Bad only when the first lines also talk about the rewrite job, since a real
 # first-person prompt can start with "I can't get my login to work".
 REFUSAL_START = re.compile(r"\A\s*(I'?m sorry|I am sorry|Sorry|Apologies|I apologi[sz]e|Unfortunately|I can'?t|I cannot|"
                            r"I won'?t|I will not|I'?m not|I am not|I'?d need|I would need|Could you|Can you paste|Please (?:paste|send|provide))", re.I)
 # Phrases that only appear when the model talks about itself or the tool.
-ROLE_TALK = re.compile(r"Promptmaxxer|\bmy role\b|prompt rewrite|\byour draft\b|the draft you|run (?:it|this) again", re.I)
-JOB_TALK = re.compile(r"draft|rewrit|Promptmaxxer|environment block|email block|system block|paste (?:just|the|your)", re.I)
+ROLE_TALK = re.compile(r"Prompt[ -]?maxxer|\bmy role\b|prompt rewrite|\byour draft\b|the draft you|run (?:it|this) again", re.I)
+JOB_TALK = re.compile(r"draft|rewrit|Prompt[ -]?maxxer|environment block|email block|system block|paste (?:just|the|your)", re.I)
 
 
 def looks_bad(out: str, draft: str) -> bool:
     """Deterministic guard: refusals, meta comments and empty or tiny outputs."""
     if not out or len(out) < min(20, len(draft)):
         return True
-    d = draft.lower()
+    def squash(s):
+        # Lowercase letters and digits only: "prompt maxxer" in the draft lets "Promptmaxxer" through.
+        return "".join(c for c in s.lower() if c.isalnum())
+
+    d = squash(draft)
 
     def new_match(rx, text):
         # Words the draft itself uses (e.g. "Promptmaxxer", "draft") are an echo, not a comment.
-        return any(m.group(0).lower() not in d for m in rx.finditer(text))
+        return any(squash(m.group(0)) not in d for m in rx.finditer(text))
 
     m = ALWAYS_BAD.match(out)
-    if (m and m.group(0).strip().lower() not in d) or ("<draft>" in out and "<draft>" not in draft):
+    if (m and squash(m.group(0)) not in d) or ("<draft>" in out and "<draft>" not in draft):
         return True
     if new_match(ROLE_TALK, out[:400]):
         return True

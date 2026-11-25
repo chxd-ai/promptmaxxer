@@ -15,7 +15,7 @@ static IDEAL_TAG: LazyLock<Regex> =
 /// Openers that are always a comment, never a prompt.
 static ALWAYS_BAD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)\A\s*(I'?m Promptmaxxer|As Promptmaxxer|The user|The draft|This draft|Here(?:'s| is) (?:the|your|a|an) (?:rewritten|improved|enhanced|better|stronger)|I'?ll rewrite|I need the draft)",
+        r"(?i)\A\s*(I'?m Prompt[ -]?maxxer|As Prompt[ -]?maxxer|The user|The draft|This draft|Here(?:'s| is) (?:the|your|a|an) (?:rewritten|improved|enhanced|better|stronger)|I'?ll rewrite|I need the draft)",
     )
     .unwrap()
 });
@@ -29,10 +29,10 @@ static REFUSAL_START: LazyLock<Regex> = LazyLock::new(|| {
 });
 /// Phrases that only appear when the model talks about itself or the tool.
 static ROLE_TALK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)Promptmaxxer|\bmy role\b|prompt rewrite|\byour draft\b|the draft you|run (?:it|this) again").unwrap()
+    Regex::new(r"(?i)Prompt[ -]?maxxer|\bmy role\b|prompt rewrite|\byour draft\b|the draft you|run (?:it|this) again").unwrap()
 });
 static JOB_TALK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)draft|rewrit|Promptmaxxer|environment block|email block|system block|paste (?:just|the|your)").unwrap()
+    Regex::new(r"(?i)draft|rewrit|Prompt[ -]?maxxer|environment block|email block|system block|paste (?:just|the|your)").unwrap()
 });
 
 /// Strip a wrapping code fence, a "Here is the improved prompt:" line and `<ideal_output>` tags.
@@ -56,8 +56,15 @@ fn head(s: &str, n: usize) -> &str {
 /// True when `re` finds a phrase in `text` that the draft itself does not contain.
 /// A draft about Promptmaxxer, drafts or rewriting makes a good rewrite repeat those words;
 /// that echo is not a comment.
+/// Spaces, hyphens and case do not count: a draft that says "prompt maxxer" lets "Promptmaxxer" through.
 fn new_match(re: &Regex, text: &str, draft_lower: &str) -> bool {
-    re.find_iter(text).any(|m| !draft_lower.contains(&m.as_str().to_lowercase()))
+    let d = squash(draft_lower);
+    re.find_iter(text).any(|m| !d.contains(&squash(m.as_str())))
+}
+
+/// Lowercase letters and digits only.
+fn squash(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
 /// True for refusals, meta comments and empty or tiny outputs.
@@ -175,6 +182,19 @@ mod tests {
         assert!(looks_bad("The user wants the list page fixed.", "list page does not load, fix it"));
         let d3 = "can't get the draft rewriter to save, fix it";
         assert!(!looks_bad("I can't get the draft rewriter to save. Find the cause and fix it.", d3));
+    }
+
+    #[test]
+    fn tool_name_spelled_differently_in_the_draft_is_an_echo() {
+        // 25 Nov 2026: this draft failed twice with "comment instead of a prompt".
+        let d = "/goal build the rest out using subagents, make sure the prompts are highly effective (use prompt maxxer)";
+        let out = "/goal Build out the rest of this project with subagents. Write every subagent prompt with Promptmaxxer first.";
+        assert!(!looks_bad(out, d));
+        assert!(!looks_bad("/goal Build the rest. Run each prompt through Prompt Maxxer.", "use promptmaxxer for the prompts"));
+        assert!(!looks_bad("/goal Build the rest. Run each prompt through prompt-maxxer.", "use Prompt Maxxer for the prompts"));
+        // A draft that never names the tool still flags it.
+        assert!(looks_bad("As Prompt Maxxer I only rewrite prompts.", "fix the login page now"));
+        assert!(looks_bad("Fix the login page. Prompt Maxxer can not do more.", "fix the login page now"));
     }
 
     #[test]

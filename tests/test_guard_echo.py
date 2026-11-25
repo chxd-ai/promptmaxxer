@@ -19,3 +19,12 @@ class EchoTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestToolNameSpelling(unittest.TestCase):
+    def test_spaced_tool_name_in_draft_is_an_echo(self):
+        d = "/goal build the rest out using subagents, make sure the prompts are highly effective (use prompt maxxer)"
+        self.assertFalse(pm.looks_bad("/goal Build out the rest with subagents. Write every prompt with Promptmaxxer first.", d))
+
+    def test_tool_name_not_in_draft_is_still_bad(self):
+        self.assertTrue(pm.looks_bad("As Prompt Maxxer I only rewrite prompts.", "fix the login page now"))
