@@ -32,6 +32,10 @@ pub struct Settings {
     pub engine: String,
     pub engine_fast: Option<String>,
     pub engine_max: Option<String>,
+    /// Model names per engine id that replace the built-in ones. Empty = built-in.
+    pub models: std::collections::BTreeMap<String, pmx_engines::LevelModels>,
+    /// The "any model" engine: an OpenAI-compatible API address and model names.
+    pub custom_api: pmx_engines::CustomApi,
     pub about_me: String,
     pub sources: Sources,
     pub blocked_projects: Vec<String>,
@@ -50,6 +54,8 @@ impl Default for Settings {
             engine: "auto".into(),
             engine_fast: None,
             engine_max: None,
+            models: Default::default(),
+            custom_api: Default::default(),
             about_me: String::new(),
             sources: Sources::default(),
             blocked_projects: vec![],
@@ -83,6 +89,10 @@ impl Settings {
         s.parse().ok()
     }
 
+    pub fn model_config(&self) -> pmx_engines::ModelConfig {
+        pmx_engines::ModelConfig { models: self.models.clone(), custom: self.custom_api.clone() }
+    }
+
     pub fn source_prefs(&self) -> pmx_context::SourcePrefs {
         pmx_context::SourcePrefs {
             about_me: self.about_me.clone(),
@@ -106,8 +116,11 @@ pub fn path() -> PathBuf {
 }
 
 /// Missing or unreadable file: defaults (an unreadable file is left alone, not overwritten until a save).
+/// Also hands the model choice to the engines, so every reader of the settings uses the same models.
 pub fn load() -> Settings {
-    load_from(&path())
+    let s = load_from(&path());
+    pmx_engines::configure(s.model_config());
+    s
 }
 
 pub fn load_from(p: &Path) -> Settings {
@@ -121,7 +134,9 @@ pub fn load_from(p: &Path) -> Settings {
 }
 
 pub fn save(s: &Settings) -> std::io::Result<()> {
-    save_to(&path(), s)
+    save_to(&path(), s)?;
+    pmx_engines::configure(s.model_config());
+    Ok(())
 }
 
 pub fn save_to(p: &Path, s: &Settings) -> std::io::Result<()> {
@@ -148,7 +163,7 @@ mod tests {
     fn defaults_match_the_contract_and_partial_files_fill_in() {
         let d = Settings::default();
         let v = serde_json::to_value(&d).unwrap();
-        for k in ["fast_key", "max_key", "engine", "engine_fast", "engine_max", "about_me", "sources", "blocked_projects",
+        for k in ["fast_key", "max_key", "engine", "engine_fast", "engine_max", "models", "custom_api", "about_me", "sources", "blocked_projects",
             "pinned_project", "history", "start_at_login", "sound", "onboarded"] {
             assert!(v.get(k).is_some(), "missing {k}");
         }

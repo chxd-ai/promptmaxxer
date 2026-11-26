@@ -11,6 +11,7 @@
 
   // Engine ids and labels; the backend label wins when present.
   const ENGINES = [
+    { id: "custom-api", label: "Any model", fast: "", max: "" },
     { id: "anthropic-key", label: "Anthropic key", fast: "claude-haiku-5-5", max: "claude-sonnet-5-5" },
     { id: "claude-plan", label: "Claude plan", fast: "haiku", max: "sonnet" },
     { id: "chatgpt-plan", label: "ChatGPT plan", fast: "", max: "" },
@@ -27,17 +28,30 @@
     let settings = {
       fast_key: "Alt+Space", max_key: "Ctrl+Shift+Space",
       engine: "auto", engine_fast: null, engine_max: null,
+      models: {}, custom_api: { base_url: "", fast_model: "", max_model: "" },
       about_me: "I run a small web studio on a Mac. Plain English, short steps, exact commands. Never push to main without asking.",
       sources: { claude_user: true, codex_user: false, project_files: true },
       blocked_projects: ["~/Clients/bank-portal"], pinned_project: null,
       history: q.get("history") !== "off", start_at_login: true, sound: false, onboarded: false,
     };
-    const statuses = () => [
-      { id: "anthropic-key", label: "Anthropic key", ready: keySaved, detail: keySaved ? "Key in Keychain" : "No key saved" },
-      { id: "claude-plan", label: "Claude plan", ready: !noneReady, detail: noneReady ? "Not signed in" : "Signed in" },
-      { id: "chatgpt-plan", label: "ChatGPT plan", ready: !onlyClaude && !noneReady, detail: onlyClaude || noneReady ? "CLI not found" : "Signed in" },
-      { id: "gemini-plan", label: "Gemini", ready: !onlyClaude && !noneReady, detail: onlyClaude || noneReady ? "Not signed in" : "Signed in" },
-    ];
+    const DEF = { "anthropic-key": ["claude-haiku-5-5", "claude-sonnet-5-5"], "claude-plan": ["haiku", "sonnet"],
+      "chatgpt-plan": ["gpt-6.2-sol", "gpt-6.2-astra"], "gemini-plan": ["flash", "pro"], "custom-api": ["", ""] };
+    const withModels = (s) => {
+      const d = DEF[s.id], c = settings.custom_api || {}, m = (settings.models || {})[s.id] || {};
+      const fast = s.id === "custom-api" ? c.fast_model || "" : m.fast || d[0];
+      const max = s.id === "custom-api" ? c.max_model || fast : m.max || d[1];
+      return { ...s, fast_model: fast, max_model: max, default_fast: d[0], default_max: d[1] };
+    };
+    const statuses = () => {
+      const c = settings.custom_api || {}, cSet = !!(c.base_url && c.fast_model);
+      return [
+        { id: "custom-api", label: "Any model (OpenAI-compatible API)", ready: cSet, detail: cSet ? (c.base_url.split("://")[1] || c.base_url).split("/")[0] : "Not set up" },
+        { id: "anthropic-key", label: "Anthropic key", ready: keySaved, detail: keySaved ? "Key in Keychain" : "No key saved" },
+        { id: "claude-plan", label: "Claude plan", ready: !noneReady, detail: noneReady ? "Not signed in" : "Signed in" },
+        { id: "chatgpt-plan", label: "ChatGPT plan", ready: !onlyClaude && !noneReady, detail: onlyClaude || noneReady ? "CLI not found" : "Signed in" },
+        { id: "gemini-plan", label: "Gemini", ready: !onlyClaude && !noneReady, detail: onlyClaude || noneReady ? "Not signed in" : "Signed in" },
+      ].map(withModels);
+    };
     const min = 60e3, hr = 36e5;
     let history = q.get("empty") ? [] : [
       { id: "h1", ts: new Date(now - 2 * min).toISOString(), app: "Ghostty", level: "standard", engine: "claude-plan", model: "haiku", ms: 1840, ok: true, draft: "fix the login bug on staging, users get kicked out", output: "Goal: find and fix why users are signed out of staging after about a minute.\nContext: shop repo. Run `pnpm test` before you say done. Do not push to main.\nSteps:\n1. Reproduce on staging with the test account and time the sign-out.\n2. Read the session code in app/auth/ and check the cookie max-age.\n3. Fix it, add a test that holds a session for 10 minutes.", target: "Claude Code", project: "shop", thumb: true },
@@ -57,11 +71,11 @@
         await wait(700);
         const st = statuses().find((e) => e.id === engine);
         if (!st || !st.ready) return { ok: false, ms: 0, model: "", error: st ? st.detail : "Unknown engine" };
-        const e = ENGINES.find((x) => x.id === engine);
-        return { ok: true, ms: { "anthropic-key": 610, "claude-plan": 1840, "chatgpt-plan": 2390, "gemini-plan": 2710 }[engine], model: e.fast, text: "Ready." };
+        return { ok: true, ms: { "custom-api": 900, "anthropic-key": 610, "claude-plan": 1840, "chatgpt-plan": 2390, "gemini-plan": 2710 }[engine], model: st.fast_model, text: "Ready." };
       },
-      save_api_key: async ({ key }) => {
+      save_api_key: async ({ provider, key }) => {
         await wait(400);
+        if (provider === "custom-api") return { ok: true };
         if (!/^sk-ant-/.test(key || "")) return { ok: false, error: "That doesn't look like an Anthropic key. It starts with sk-ant-." };
         keySaved = true; return { ok: true };
       },
