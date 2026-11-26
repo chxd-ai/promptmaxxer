@@ -355,7 +355,7 @@ async fn run_press(level0: Level) {
             log(&format!("press: failed after {total} ms with {}: {e}", engine.as_str()));
             if s.history {
                 history::append(&history::Row {
-                    app: &front.name, level: level_str(level), engine: engine.as_str(), model: Some(engine.model(level)), ms: total,
+                    app: &front.name, level: level_str(level), engine: engine.as_str(), model: Some(&engine.model(level)), ms: total,
                     ok: false, retried: None, draft: &draft, output: None, error: Some(&e.to_string()),
                     target: Some(&target_label), target_hint: hint.as_deref(), project: project.as_deref(),
                 });

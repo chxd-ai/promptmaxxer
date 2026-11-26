@@ -159,7 +159,7 @@ body{display:flex;flex-direction:column;min-width:560px}
   let engines = [];
   async function loadEngines() { engines = await invoke("list_engines"); renderEngines(); }
   function renderEngines() {
-    $("#engines").innerHTML = engines.filter((e) => e.id !== "anthropic-key" || e.ready).map((e) => {
+    $("#engines").innerHTML = engines.filter((e) => (e.id !== "anthropic-key" && e.id !== "custom-api") || e.ready).map((e) => {
       const t = tests[e.id] || {};
       const res = t.busy ? '<span class="res">Testing…</span>' : t.text ? `<span class="res ${t.ok ? "ok" : ""}">${esc(t.text)}</span>` : "";
       return `<div class="row"><span class="k"><b>${esc(e.label)}</b>${res}</span>

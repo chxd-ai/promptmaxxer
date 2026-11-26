@@ -36,7 +36,7 @@ pub fn run(args: &[String]) -> i32 {
     let engine = match flag(args, "--engine") {
         Some(e) => match e.parse::<EngineId>() {
             Ok(id) => id,
-            Err(_) => return fail(format!("unknown engine '{e}' (anthropic-key, claude-plan, chatgpt-plan, gemini-plan)"), &raw),
+            Err(_) => return fail(format!("unknown engine '{e}' (custom-api, anthropic-key, claude-plan, chatgpt-plan, gemini-plan)"), &raw),
         },
         None => match pmx_engines::pick(s.engine_pref(level), &pmx_engines::detect_all()) {
             Some(id) => id,

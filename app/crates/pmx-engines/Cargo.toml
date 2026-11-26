@@ -3,7 +3,7 @@ name = "pmx-engines"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Promptmaxxer rewrite engines: Anthropic API key, Claude plan (Claude Code CLI), ChatGPT plan (Codex CLI), Google account (Gemini CLI)."
+description = "Promptmaxxer rewrite engines: any OpenAI-compatible API, Anthropic API key, Claude plan (Claude Code CLI), ChatGPT plan (Codex CLI), Google account (Gemini CLI)."
 
 [dependencies]
 tokio = { version = "1", features = ["process", "io-util", "time", "sync", "macros", "rt-multi-thread", "net"] }
