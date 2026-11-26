@@ -1,7 +1,7 @@
 # promptmaxxer v1: product spec
 
 The original design spec for v1. Decisions: no server in v1; built with Tauri. Brand: `brand/BRAND.md`.
-Where the built app differs: it also runs on a Claude plan (Claude Code CLI) a ChatGPT plan (Codex CLI) or any OpenAI-compatible API (cloud or local), not only an Anthropic API key; every model name can be changed; and the default max key is Ctrl+Shift+Space.
+Where the built app differs: it also runs on a Claude plan (Claude Code CLI), a ChatGPT plan (Codex CLI) or any OpenAI-compatible API (cloud or local), not only an Anthropic API key; every model name can be changed; and the default max key is Ctrl+Shift+Space.
 
 ## What it is
 A small Mac menu bar app. Highlight text in any app, press one key, and the text is replaced by a strong prompt that fits the AI it is going to and the project you are in.
