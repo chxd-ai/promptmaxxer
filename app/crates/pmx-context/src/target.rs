@@ -1,5 +1,6 @@
 //! Map the front app (and, for browsers and terminals, its window title) to the receiving AI.
 //! Order: bundle id first, then app name, then window title.
+//! On Windows the "bundle id" is the program file name in lower case (`windowsterminal.exe`).
 
 use crate::{AppInfo, Target, TargetKind};
 
@@ -60,7 +61,38 @@ const KNOWN: &[Known] = &[
     Known { bundle: "app.zen-browser.zen", name: "zen", class: AppClass::Browser, label: "Zen" },
     Known { bundle: "ai.perplexity.comet", name: "comet", class: AppClass::Browser, label: "Comet" },
     Known { bundle: "com.openai.atlas", name: "chatgpt atlas", class: AppClass::Browser, label: "ChatGPT Atlas" },
+    // Windows, by program file name. Names are left empty: Windows matches on the file name only.
+    Known { bundle: "windowsterminal.exe", name: "", class: AppClass::Terminal, label: "Windows Terminal" },
+    Known { bundle: "powershell.exe", name: "", class: AppClass::Terminal, label: "PowerShell" },
+    Known { bundle: "pwsh.exe", name: "", class: AppClass::Terminal, label: "PowerShell" },
+    Known { bundle: "cmd.exe", name: "", class: AppClass::Terminal, label: "Command Prompt" },
+    Known { bundle: "conhost.exe", name: "", class: AppClass::Terminal, label: "Console" },
+    Known { bundle: "openconsole.exe", name: "", class: AppClass::Terminal, label: "Console" },
+    Known { bundle: "mintty.exe", name: "", class: AppClass::Terminal, label: "Git Bash" },
+    Known { bundle: "wezterm-gui.exe", name: "", class: AppClass::Terminal, label: "WezTerm" },
+    Known { bundle: "alacritty.exe", name: "", class: AppClass::Terminal, label: "Alacritty" },
+    Known { bundle: "tabby.exe", name: "", class: AppClass::Terminal, label: "Tabby" },
+    Known { bundle: "hyper.exe", name: "", class: AppClass::Terminal, label: "Hyper" },
+    Known { bundle: "warp.exe", name: "", class: AppClass::Terminal, label: "Warp" },
+    Known { bundle: "code.exe", name: "", class: AppClass::Editor("Code"), label: "VS Code" },
+    Known { bundle: "code - insiders.exe", name: "", class: AppClass::Editor("Code - Insiders"), label: "VS Code" },
+    Known { bundle: "vscodium.exe", name: "", class: AppClass::Editor("VSCodium"), label: "VSCodium" },
+    Known { bundle: "cursor.exe", name: "", class: AppClass::Editor("Cursor"), label: "Cursor" },
+    Known { bundle: "windsurf.exe", name: "", class: AppClass::Editor("Windsurf"), label: "Windsurf" },
+    Known { bundle: "zed.exe", name: "", class: AppClass::Editor(""), label: "Zed" },
+    Known { bundle: "chrome.exe", name: "", class: AppClass::Browser, label: "Chrome" },
+    Known { bundle: "msedge.exe", name: "", class: AppClass::Browser, label: "Edge" },
+    Known { bundle: "firefox.exe", name: "", class: AppClass::Browser, label: "Firefox" },
+    Known { bundle: "brave.exe", name: "", class: AppClass::Browser, label: "Brave" },
+    Known { bundle: "opera.exe", name: "", class: AppClass::Browser, label: "Opera" },
+    Known { bundle: "vivaldi.exe", name: "", class: AppClass::Browser, label: "Vivaldi" },
+    Known { bundle: "arc.exe", name: "", class: AppClass::Browser, label: "Arc" },
+    Known { bundle: "zen.exe", name: "", class: AppClass::Browser, label: "Zen" },
+    Known { bundle: "comet.exe", name: "", class: AppClass::Browser, label: "Comet" },
 ];
+
+/// Windows JetBrains IDEs (`idea64.exe`, `pycharm64.exe`, ...) and Android Studio (`studio64.exe`).
+const JETBRAINS_EXE: &[&str] = &["idea", "pycharm", "webstorm", "phpstorm", "rider", "goland", "clion", "rubymine", "rustrover", "datagrip", "studio"];
 
 fn known(app: &AppInfo) -> Option<&'static Known> {
     let bid = app.bundle_id.to_lowercase();
@@ -69,7 +101,8 @@ fn known(app: &AppInfo) -> Option<&'static Known> {
             return Some(k);
         }
         // JetBrains IDEs: com.jetbrains.intellij, com.jetbrains.pycharm, ...
-        if bid.starts_with("com.jetbrains.") || bid.starts_with("com.google.android.studio") {
+        let jetbrains_exe = bid.strip_suffix(".exe").map(|s| s.trim_end_matches("64")).is_some_and(|s| JETBRAINS_EXE.contains(&s));
+        if bid.starts_with("com.jetbrains.") || bid.starts_with("com.google.android.studio") || jetbrains_exe {
             return Some(&Known { bundle: "", name: "", class: AppClass::Editor(""), label: "" });
         }
     }
@@ -129,7 +162,16 @@ pub fn target_for(app: &AppInfo, window_title: Option<&str>) -> Target {
         "com.microsoft.copilot-mac" | "com.microsoft.copilot" => return t(TargetKind::Chat, "Copilot"),
         "com.liuliu.draw-things" => return t(TargetKind::Image, "Draw Things"),
         "com.divamgupta.diffusionbee" => return t(TargetKind::Image, "DiffusionBee"),
-        "com.microsoft.excel" => return t(TargetKind::Data, "Excel"),
+        "com.microsoft.excel" | "excel.exe" => return t(TargetKind::Data, "Excel"),
+        // Windows desktop apps, by program file name.
+        "claude.exe" => {
+            if contains_word(title, "Claude Code") {
+                return t(TargetKind::CodingAgent, "Claude Code");
+            }
+            return t(TargetKind::Chat, "Claude");
+        }
+        "chatgpt.exe" => return t(TargetKind::Chat, "ChatGPT"),
+        "perplexity.exe" => return t(TargetKind::Research, "Perplexity"),
         "com.apple.iwork.numbers" => return t(TargetKind::Data, "Numbers"),
         _ => {}
     }
@@ -329,6 +371,27 @@ mod tests {
         assert_eq!(target_for(&app("Cursor", ""), None).kind, TargetKind::CodingAgent);
         // JetBrains.
         assert_eq!(target_for(&app("PyCharm", "com.jetbrains.pycharm"), None), t(TargetKind::CodingAgent, "PyCharm"));
+    }
+
+    #[test]
+    fn windows_programs() {
+        for (n, b, label) in [
+            ("WindowsTerminal", "windowsterminal.exe", "Windows Terminal"),
+            ("powershell", "powershell.exe", "PowerShell"),
+            ("pwsh", "pwsh.exe", "PowerShell"),
+            ("cmd", "cmd.exe", "Command Prompt"),
+        ] {
+            assert_eq!(target_for(&app(n, b), Some("C:\\Users\\x")), t(TargetKind::CodingAgent, label), "{n}");
+        }
+        assert_eq!(target_for(&app("WindowsTerminal", "windowsterminal.exe"), Some("\u{2733} Claude Code")).label, "Claude Code");
+        assert_eq!(target_for(&app("Code", "code.exe"), None), t(TargetKind::CodingAgent, "VS Code"));
+        assert_eq!(target_for(&app("Cursor", "cursor.exe"), None), t(TargetKind::CodingAgent, "Cursor"));
+        assert_eq!(target_for(&app("pycharm64", "pycharm64.exe"), None), t(TargetKind::CodingAgent, "pycharm64"));
+        assert_eq!(target_for(&app("chrome", "chrome.exe"), Some("ChatGPT - Google Chrome")), t(TargetKind::Chat, "ChatGPT"));
+        assert_eq!(target_for(&app("msedge", "msedge.exe"), Some("Claude - Personal - Microsoft\u{200b} Edge")), t(TargetKind::Chat, "Claude"));
+        assert_eq!(target_for(&app("chrome", "chrome.exe"), Some("News - Google Chrome")).kind, TargetKind::Unknown);
+        assert_eq!(target_for(&app("claude", "claude.exe"), None), t(TargetKind::Chat, "Claude"));
+        assert_eq!(target_for(&app("notepad", "notepad.exe"), None).kind, TargetKind::Unknown);
     }
 
     #[test]

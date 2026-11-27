@@ -271,8 +271,8 @@ fn detect_anthropic() -> EngineStatus {
 fn detect_claude() -> EngineStatus {
     let id = EngineId::ClaudePlan;
     let Some(cli) = paths::find_cli("claude") else { return status(id, false, "CLI not found") };
-    let mut c = StdCommand::new(&cli);
-    c.args(["auth", "status", "--json"]).current_dir("/tmp").env("PATH", paths::child_path(&cli));
+    let mut c = paths::std_command(&cli);
+    c.args(["auth", "status", "--json"]).current_dir(paths::status_dir()).env("PATH", paths::child_path(&cli));
     match quick_output(c).and_then(|(_, out)| claude::parse_auth_status(&out)) {
         Some(true) => status(id, true, "Signed in"),
         Some(false) => status(id, false, "Not signed in"),
@@ -284,8 +284,8 @@ fn detect_codex() -> EngineStatus {
     let id = EngineId::ChatGptPlan;
     let Some(launcher) = paths::find_cli("codex") else { return status(id, false, "CLI not found") };
     let Some(cli) = paths::codex_native(&launcher) else { return status(id, false, "CLI found, but its program file is missing") };
-    let mut c = StdCommand::new(&cli);
-    c.args(["login", "status"]).current_dir("/tmp").env("PATH", paths::child_path(&cli));
+    let mut c = paths::std_command(&cli);
+    c.args(["login", "status"]).current_dir(paths::status_dir()).env("PATH", paths::child_path(&cli));
     match quick_output(c) {
         Some((_, out)) => {
             let (ready, detail) = codex::parse_login_status(&out);
@@ -583,8 +583,18 @@ mod tests {
 
     #[test]
     fn quick_output_times_out() {
-        let mut c = StdCommand::new("/bin/sleep");
-        c.arg("5");
+        #[cfg(unix)]
+        let c = {
+            let mut c = StdCommand::new("/bin/sleep");
+            c.arg("5");
+            c
+        };
+        #[cfg(windows)]
+        let c = {
+            let mut c = StdCommand::new("powershell.exe");
+            c.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 5"]);
+            c
+        };
         let t = Instant::now();
         assert!(quick_output(c).is_none());
         assert!(t.elapsed() < Duration::from_secs(2));

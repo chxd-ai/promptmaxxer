@@ -1,4 +1,4 @@
-//! Front app, window title and window document (macOS). Never prompts for a permission.
+//! Front app, window title and window document (macOS; Windows: front app and title only). Never prompts for a permission.
 //!
 //! - Front app: NSWorkspace `frontmostApplication` (no permission).
 //! - Window title: Accessibility (`AXFocusedWindow` -> `AXTitle`), needs the Accessibility
@@ -135,7 +135,85 @@ mod mac {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows: the foreground window's process (name = exe name without `.exe`, `bundle_id` = exe file name in
+/// lower case, e.g. `windowsterminal.exe`) and its title. No permission needed. No window document.
+#[cfg(windows)]
+mod mac {
+    use super::AppInfo;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
+
+    /// Full path of a process's program file.
+    pub fn exe_path(pid: u32) -> Option<String> {
+        // SAFETY: plain calls; the buffer size is passed in and the handle closed once.
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                return None;
+            }
+            let mut buf = vec![0u16; 1024];
+            let mut len = buf.len() as u32;
+            let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut len) != 0;
+            CloseHandle(h);
+            ok.then(|| String::from_utf16_lossy(&buf[..len as usize]))
+        }
+    }
+
+    pub fn front_app() -> Option<AppInfo> {
+        // SAFETY: plain calls on the foreground window handle.
+        let pid = unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd.is_null() {
+                return None;
+            }
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            pid
+        };
+        if pid == 0 {
+            return None;
+        }
+        let path = exe_path(pid).unwrap_or_default();
+        let file = path.rsplit(['\\', '/']).next().unwrap_or("").to_string();
+        let name = file.strip_suffix(".exe").or_else(|| file.strip_suffix(".EXE")).unwrap_or(&file).to_string();
+        Some(AppInfo { name, bundle_id: file.to_lowercase(), pid: pid as i32 })
+    }
+
+    pub fn accessibility_trusted() -> bool {
+        true
+    }
+    pub fn screen_recording_allowed() -> bool {
+        true
+    }
+    /// The foreground window's title when it belongs to `pid`.
+    pub fn ax_title(pid: i32) -> Option<String> {
+        // SAFETY: plain calls; the buffer size is passed in.
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd.is_null() {
+                return None;
+            }
+            let mut owner = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut owner);
+            if owner as i32 != pid {
+                return None;
+            }
+            let mut buf = vec![0u16; 512];
+            let n = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+            let s = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+            (!s.trim().is_empty()).then_some(s)
+        }
+    }
+    pub fn ax_document(_pid: i32) -> Option<String> {
+        None
+    }
+    pub fn cg_title(_pid: i32) -> Option<String> {
+        None
+    }
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 mod mac {
     use super::AppInfo;
     pub fn front_app() -> Option<AppInfo> {
@@ -158,7 +236,7 @@ mod mac {
     }
 }
 
-/// The app in front, from NSWorkspace. No permission needed.
+/// The app in front, from NSWorkspace (Windows: the foreground window's process). No permission needed.
 pub fn front_app() -> Option<AppInfo> {
     mac::front_app()
 }

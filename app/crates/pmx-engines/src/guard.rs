@@ -80,6 +80,10 @@ pub fn looks_bad(out: &str, draft: &str) -> bool {
     if ["/tmp/promptmaxxer-run", "/private/tmp/claude-"].iter().any(|p| out.contains(p) && !draft.contains(p)) {
         return true;
     }
+    // Windows: the scratch folder sits in the per-user temp folder (`...\Temp\promptmaxxer-run`).
+    if cfg!(windows) && out.contains("\\promptmaxxer-run") && !draft.contains("promptmaxxer-run") {
+        return true;
+    }
     let first = head(out, 400);
     if new_match(&ROLE_TALK, first, &d) {
         return true;

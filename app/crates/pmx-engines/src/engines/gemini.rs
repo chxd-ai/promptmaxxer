@@ -41,10 +41,14 @@ pub(crate) fn signed_in(real: &Path) -> (bool, &'static str) {
 }
 
 pub(crate) fn prepare_home(real: &Path, scratch_home: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::{symlink, PermissionsExt};
     let dir = scratch_home.join(".gemini");
     std::fs::create_dir_all(&dir)?;
-    std::fs::set_permissions(scratch_home, std::fs::Permissions::from_mode(0o700))?;
+    // Windows: the per-user temp folder is already private to the user.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(scratch_home, std::fs::Permissions::from_mode(0o700))?;
+    }
     let auth = std::fs::read_to_string(real.join("settings.json")).ok().and_then(|s| selected_auth(&s));
     let mut settings = json!({
         // A context file name that never exists, so no AGENTS.md or GEMINI.md is loaded.
@@ -59,9 +63,20 @@ pub(crate) fn prepare_home(real: &Path, scratch_home: &Path) -> std::io::Result<
     for name in ["oauth_creds.json", "google_accounts.json"] {
         let target = real.join(name);
         let link = dir.join(name);
-        let _ = std::fs::remove_file(&link);
-        if target.exists() {
-            symlink(&target, &link)?;
+        #[cfg(windows)]
+        {
+            if target.exists() {
+                crate::paths::share_file(&target, &link)?;
+            } else {
+                let _ = std::fs::remove_file(&link);
+            }
+        }
+        #[cfg(unix)]
+        {
+            let _ = std::fs::remove_file(&link);
+            if target.exists() {
+                std::os::unix::fs::symlink(&target, &link)?;
+            }
         }
     }
     for name in ["AGENTS.md", "GEMINI.md"] {
@@ -71,7 +86,7 @@ pub(crate) fn prepare_home(real: &Path, scratch_home: &Path) -> std::io::Result<
 }
 
 pub(crate) fn command(cli: &Path, model: &str, framework_file: &Path, home: &Path, user_message: &str) -> Command {
-    let mut c = Command::new(cli);
+    let mut c = crate::paths::cli_command(cli);
     c.args(["--model", model, "--output-format", "stream-json", "--approval-mode", "plan", "--skip-trust"])
         .arg("--prompt")
         .arg(user_message)

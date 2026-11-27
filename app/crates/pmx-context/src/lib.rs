@@ -146,6 +146,18 @@ pub mod diag {
     pub use crate::project::detect_project_with_source;
 }
 
+/// Windows: the user profile folder (`%USERPROFILE%`).
+#[cfg(windows)]
+pub(crate) fn home_dir() -> PathBuf {
+    ["USERPROFILE", "HOME"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .find(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+#[cfg(unix)]
 pub(crate) fn home_dir() -> PathBuf {
     if let Some(h) = std::env::var_os("HOME") {
         if !h.is_empty() {

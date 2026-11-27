@@ -22,9 +22,13 @@ pub(crate) fn scratch_home() -> PathBuf {
 
 /// Create the throwaway home: mode 700, links to `auth.json` and the auth lock files, nothing else.
 pub(crate) fn prepare_home(real: &Path, scratch: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::{symlink, PermissionsExt};
     std::fs::create_dir_all(scratch)?;
-    std::fs::set_permissions(scratch, std::fs::Permissions::from_mode(0o700))?;
+    // Windows: the per-user temp folder is already private to the user.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(scratch, std::fs::Permissions::from_mode(0o700))?;
+    }
     for name in ["auth.json", "auth.lock", "auth.json.lock"] {
         let target = real.join(name);
         let link = scratch.join(name);
@@ -35,12 +39,22 @@ pub(crate) fn prepare_home(real: &Path, scratch: &Path) -> std::io::Result<()> {
             }
             continue;
         }
+        #[cfg(windows)]
+        {
+            let _ = current;
+            crate::paths::share_file(&target, &link)?;
+            continue;
+        }
+        #[cfg(unix)]
         if current.as_deref() == Some(target.as_path()) {
             continue;
         }
         // A plain file here would be a stale copy; replace it with the link.
-        let _ = std::fs::remove_file(&link);
-        symlink(&target, &link)?;
+        #[cfg(unix)]
+        {
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(&target, &link)?;
+        }
     }
     // Never let a global instructions file sit in the scratch home.
     for name in ["AGENTS.md", "AGENTS.override.md", "config.toml"] {
@@ -55,7 +69,7 @@ pub(crate) fn effort(model: &str) -> &'static str {
 }
 
 pub(crate) fn command(cli: &Path, model: &str, framework_file: &Path, home: &Path) -> Command {
-    let mut c = Command::new(cli);
+    let mut c = crate::paths::cli_command(cli);
     let fw = toml_string(&framework_file.to_string_lossy());
     c.arg("exec")
         .args(["--json", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules"])
@@ -220,6 +234,7 @@ mod tests {
         assert!(p.finish(false, "").unwrap_err().to_string().contains("usage limit"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn scratch_home_links_auth_only() {
         let base = std::env::temp_dir().join(format!("pmx-codex-test-{}", std::process::id()));

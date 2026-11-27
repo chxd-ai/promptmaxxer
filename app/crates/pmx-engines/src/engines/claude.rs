@@ -7,7 +7,7 @@ use std::path::Path;
 use tokio::process::Command;
 
 pub(crate) fn command(cli: &Path, model: &str, framework_file: &Path) -> Command {
-    let mut c = Command::new(cli);
+    let mut c = crate::paths::cli_command(cli);
     c.args(["-p", "--model", model])
         // No user, project or local settings: no hooks, plugins, permissions or output styles.
         .args(["--setting-sources", ""])

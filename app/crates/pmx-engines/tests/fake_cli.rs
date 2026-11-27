@@ -1,5 +1,6 @@
 //! The CLI engines' process handling, with small shell scripts standing in for the CLIs.
-//! No model calls.
+//! No model calls. Unix only: the stand-ins are `/bin/sh` scripts.
+#![cfg(unix)]
 
 use pmx_engines::{complete_with, run_with, EngineError, EngineId, Event, Level, Request, RunOptions};
 use std::os::unix::fs::PermissionsExt;

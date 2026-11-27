@@ -1,5 +1,5 @@
 //! Run one CLI call: write stdin, read stdout line by line, stream deltas, obey cancel and timeout.
-//! The child gets its own process group, and cancel or timeout kills the whole group.
+//! The child gets its own process group (Windows: a job object), and cancel or timeout kills the whole group.
 
 use crate::{EngineError, Event};
 use std::process::Stdio;
@@ -22,17 +22,78 @@ pub(crate) trait LineParser: Send {
     }
 }
 
-fn kill_group(pid: Option<u32>) {
-    if let Some(pid) = pid {
+#[cfg(unix)]
+mod group {
+    /// The child's process group (its pid, because of `process_group(0)`).
+    pub(super) struct Group(u32);
+
+    pub(super) fn prepare(cmd: &mut tokio::process::Command) {
+        cmd.process_group(0);
+    }
+
+    pub(super) fn attach(child: &tokio::process::Child) -> Option<Group> {
+        child.id().map(Group)
+    }
+
+    pub(super) fn kill(g: Group) {
         // SAFETY: plain syscall; the group id is the child's pid because of process_group(0).
         unsafe {
-            libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+            libc::killpg(g.0 as libc::pid_t, libc::SIGKILL);
         }
     }
 }
 
+#[cfg(windows)]
+mod group {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW, TerminateJobObject};
+
+    /// A job object holding the child; processes it starts join the job too, so the whole tree can be ended.
+    pub(super) struct Group(HANDLE);
+    // SAFETY: a job handle may be used and closed from any thread.
+    unsafe impl Send for Group {}
+    unsafe impl Sync for Group {}
+
+    impl Drop for Group {
+        fn drop(&mut self) {
+            // SAFETY: our own handle, closed once. Closing does not end the processes.
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+
+    pub(super) fn prepare(_cmd: &mut tokio::process::Command) {}
+
+    pub(super) fn attach(child: &tokio::process::Child) -> Option<Group> {
+        let proc_handle = child.raw_handle()? as HANDLE;
+        // SAFETY: plain calls on a new job handle and the live child's handle.
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                return None;
+            }
+            let g = Group(job);
+            (AssignProcessToJobObject(g.0, proc_handle) != 0).then_some(g)
+        }
+    }
+
+    pub(super) fn kill(g: Group) {
+        // SAFETY: our own live job handle.
+        unsafe {
+            TerminateJobObject(g.0, 1);
+        }
+    }
+}
+
+fn kill_group(g: Option<group::Group>) {
+    if let Some(g) = g {
+        group::kill(g);
+    }
+}
+
 /// Kills the process group if the future is dropped before the child is reaped.
-struct GroupGuard(Option<u32>);
+struct GroupGuard(Option<group::Group>);
 impl Drop for GroupGuard {
     fn drop(&mut self) {
         kill_group(self.0.take());
@@ -51,10 +112,10 @@ pub(crate) async fn run_cli(
     cmd.stdin(if stdin_text.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .process_group(0);
+        .kill_on_drop(true);
+    group::prepare(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| EngineError::Cli(format!("could not start the CLI: {e}")))?;
-    let mut guard = GroupGuard(child.id());
+    let mut guard = GroupGuard(group::attach(&child));
 
     if let Some(text) = stdin_text {
         let mut stdin = child.stdin.take().expect("stdin piped");

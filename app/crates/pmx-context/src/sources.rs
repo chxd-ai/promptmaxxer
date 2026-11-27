@@ -234,6 +234,7 @@ mod tests {
         assert_eq!(sources_with_home(None, &SourcePrefs::all_on(), &fx.home).len(), 2);
     }
 
+    #[cfg(unix)]
     #[test]
     fn linked_file_listed_once() {
         let fx = fixture();
