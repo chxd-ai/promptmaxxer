@@ -38,7 +38,7 @@ pub fn run(args: &[String]) -> i32 {
             Ok(id) => id,
             Err(_) => return fail(format!("unknown engine '{e}' (custom-api, anthropic-key, claude-plan, chatgpt-plan, gemini-plan)"), &raw),
         },
-        None => match pmx_engines::pick(s.engine_pref(level), &pmx_engines::detect_all()) {
+        None => match s.pick_engine(level, &pmx_engines::detect_all()) {
             Some(id) => id,
             None => return fail("no AI is ready. Pick one in promptmaxxer settings.".into(), &raw),
         },
@@ -54,7 +54,7 @@ pub fn run(args: &[String]) -> i32 {
     let brief = if args.iter().any(|a| a == "--no-brief") {
         None
     } else {
-        let fast = pmx_engines::pick(s.engine_pref(Level::Standard), &pmx_engines::detect_all()).unwrap_or(engine);
+        let fast = s.pick_engine(Level::Standard, &pmx_engines::detect_all()).unwrap_or(engine);
         rt.block_on(context::brief_wait(&ctx, fast))
     };
     eprintln!(

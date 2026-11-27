@@ -94,7 +94,7 @@ pub fn refresh_statuses() -> Vec<EngineStatus> {
     let st = pmx_engines::detect_all();
     *STATUSES.lock().unwrap() = Some((Instant::now(), st.clone()));
     let s = settings::load();
-    let label = match pmx_engines::pick(s.engine_pref(Level::Standard), &st) {
+    let label = match s.pick_engine(Level::Standard, &st) {
         Some(id) => format!("Engine: {}", id.label()),
         None => "Engine: none ready".to_string(),
     };
@@ -254,7 +254,7 @@ async fn run_press(level0: Level) {
         }
     };
     let statuses = st_task.await.unwrap_or_default();
-    let pick = |l: Level| pmx_engines::pick(s.engine_pref(l), &statuses);
+    let pick = |l: Level| s.pick_engine(l, &statuses);
     let mut level = level0;
     let Some(mut engine) = pick(level) else {
         selection::abandon(captured);
@@ -367,8 +367,9 @@ async fn run_press(level0: Level) {
 }
 
 /// History "re-run": same draft, the chosen level, result to the clipboard (the original app may be gone).
-pub fn rerun(item: serde_json::Value, level: Level) {
-    let Some(guard) = begin(level) else { return };
+/// False when a press is already running (nothing is started).
+pub fn rerun(item: serde_json::Value, level: Level) -> bool {
+    let Some(guard) = begin(level) else { return false };
     tauri::async_runtime::spawn(async move {
         let _guard = guard;
         let Some(app) = APP.get().cloned() else { return };
@@ -379,7 +380,7 @@ pub fn rerun(item: serde_json::Value, level: Level) {
             return;
         }
         let statuses = tokio::task::spawn_blocking(statuses).await.unwrap_or_default();
-        let Some(engine) = pmx_engines::pick(s.engine_pref(level), &statuses) else {
+        let Some(engine) = s.pick_engine(level, &statuses) else {
             notify(&app, selection::MSG_NO_ENGINE);
             return;
         };
@@ -430,6 +431,7 @@ pub fn rerun(item: serde_json::Value, level: Level) {
             }
         }
     });
+    true
 }
 
 /// `bar_undo`: the paste was one edit, so Cmd+Z in the same app puts the original back. Done only when that app

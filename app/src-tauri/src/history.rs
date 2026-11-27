@@ -4,6 +4,18 @@
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
+
+/// Rows kept: the newest this many. Older rows are dropped when a row is added.
+pub const MAX_ROWS: usize = 2000;
+
+/// One writer at a time in this process: a thumb or delete rewrite that overlapped an append would drop the
+/// appended row.
+static WRITE: Mutex<()> = Mutex::new(());
+
+fn write_lock() -> MutexGuard<'static, ()> {
+    WRITE.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 pub struct Row<'a> {
     pub app: &'a str,
@@ -61,12 +73,27 @@ fn set_600(path: &Path) -> std::io::Result<()> {
 }
 
 pub fn append_value(path: &Path, v: &Value) -> std::io::Result<()> {
+    append_capped(path, v, MAX_ROWS)
+}
+
+fn append_capped(path: &Path, v: &Value, max: usize) -> std::io::Result<()> {
+    let _w = write_lock();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let mut f = crate::paths::private_file(path, false)?;
-    f.write_all(format!("{v}\n").as_bytes())?;
-    set_600(path)
+    {
+        let mut f = crate::paths::private_file(path, false)?;
+        f.write_all(format!("{v}\n").as_bytes())?;
+    }
+    set_600(path)?;
+    // Cheap line count first; the file is only parsed and rewritten when it is over the cap.
+    let lines = std::fs::read(path).map(|b| b.iter().filter(|&&c| c == b'\n').count()).unwrap_or(0);
+    if lines > max {
+        let rows = read_all(path);
+        let keep = rows.len().saturating_sub(max);
+        write_all(path, &rows[keep..])?;
+    }
+    Ok(())
 }
 
 /// Every line as JSON (bad lines skipped), oldest first, each with an `id`.
@@ -147,6 +174,7 @@ pub fn delete(path: &Path, id: Option<&str>) -> std::io::Result<()> {
     if !path.exists() {
         return Ok(());
     }
+    let _w = write_lock();
     let rows: Vec<Value> = match id {
         None => vec![],
         Some(id) => read_all(path).into_iter().filter(|v| v["id"] != id).collect(),
@@ -155,6 +183,7 @@ pub fn delete(path: &Path, id: Option<&str>) -> std::io::Result<()> {
 }
 
 pub fn thumb(path: &Path, id: &str, up: Option<bool>) -> std::io::Result<bool> {
+    let _w = write_lock();
     let mut rows = read_all(path);
     let mut found = false;
     for v in rows.iter_mut().filter(|v| v["id"] == id) {
@@ -200,6 +229,40 @@ mod tests {
         assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
         let ids: Vec<_> = read_all(&p).iter().map(|v| v["id"].clone()).collect();
         assert_ne!(ids[0], ids[1]);
+    }
+
+    #[test]
+    fn append_keeps_the_newest_rows_only() {
+        let p = tmp("cap");
+        for i in 0..7 {
+            append_capped(&p, &row_json(&row(&format!("draft {i}"))), 5).unwrap();
+        }
+        let all = list(&p, "");
+        assert_eq!(all.len(), 5);
+        assert_eq!(all[0]["draft"], "draft 6");
+        assert_eq!(all[4]["draft"], "draft 2");
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn rewrites_and_appends_at_once_lose_no_row() {
+        let p = tmp("race");
+        append_value(&p, &row_json(&row("first"))).unwrap();
+        let id = read_all(&p)[0]["id"].as_str().unwrap().to_string();
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                for i in 0..40 {
+                    append_value(&p, &row_json(&row(&format!("row {i}")))).unwrap();
+                }
+            });
+            s.spawn(|| {
+                for i in 0..40 {
+                    thumb(&p, &id, Some(i % 2 == 0)).unwrap();
+                }
+            });
+        });
+        assert_eq!(read_all(&p).len(), 41);
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
     }
 
     #[test]

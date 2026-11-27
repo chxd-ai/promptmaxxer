@@ -14,7 +14,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_MENU, VK_RWIN, VK_SHIFT,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetCursorPos, GetWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindow, GW_OWNER,
+    EnumWindows, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow, ShowWindow, GW_OWNER,
     SW_RESTORE,
 };
 
@@ -315,6 +315,37 @@ fn main_window(pid: i32) -> Option<HWND> {
         EnumWindows(Some(each), &mut f as *mut Find as LPARAM);
     }
     (!f.found.is_null()).then_some(f.found)
+}
+
+/// The foreground window, when it belongs to app `pid`.
+pub fn front_window(pid: i32) -> Option<u64> {
+    // SAFETY: plain calls; a null window is checked.
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return None;
+        }
+        let mut owner = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut owner);
+        (owner == pid as u32).then_some(hwnd as usize as u64)
+    }
+}
+
+/// Bring back the window the press came from (`window`, from [`front_window`]), else the app's main window.
+pub fn activate_to(pid: i32, window: Option<u64>) -> bool {
+    if let Some(w) = window {
+        let hwnd = w as usize as HWND;
+        // SAFETY: IsWindow checks the handle is still a live window before it is used.
+        unsafe {
+            if IsWindow(hwnd) != 0 {
+                if IsIconic(hwnd) != 0 {
+                    ShowWindow(hwnd, SW_RESTORE);
+                }
+                return SetForegroundWindow(hwnd) != 0;
+            }
+        }
+    }
+    activate(pid)
 }
 
 /// Bring an app to the front (used before a paste when our own bar took the focus).

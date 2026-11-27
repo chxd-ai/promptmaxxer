@@ -87,17 +87,31 @@ fn expand(p: &str) -> PathBuf {
 }
 
 impl Settings {
-    /// The engine preference for a level: the per-key pin, else the overall one. `None` = auto.
-    pub fn engine_pref(&self, level: pmx_engines::Level) -> Option<pmx_engines::EngineId> {
+    /// The engine for a press at this level, from the ready list: a pinned engine only when it is ready, else
+    /// the first ready one on Auto. A pinned name this version does not know picks nothing (never Auto, which
+    /// could bill another account).
+    pub fn pick_engine(&self, level: pmx_engines::Level, statuses: &[pmx_engines::EngineStatus]) -> Option<pmx_engines::EngineId> {
+        match self.engine_pref(level) {
+            Ok(pref) => pmx_engines::pick(pref, statuses),
+            Err(name) => {
+                crate::log::log(&format!("settings: unknown engine '{name}' pinned; nothing picked"));
+                None
+            }
+        }
+    }
+
+    /// The engine preference for a level: the per-key pin, else the overall one. `Ok(None)` = auto,
+    /// `Err(name)` = a pinned name that is not a known engine.
+    pub fn engine_pref(&self, level: pmx_engines::Level) -> Result<Option<pmx_engines::EngineId>, String> {
         let per_key = match level {
             pmx_engines::Level::Standard => self.engine_fast.as_deref(),
             pmx_engines::Level::Max => self.engine_max.as_deref(),
         };
         let s = per_key.filter(|s| !s.trim().is_empty()).unwrap_or(self.engine.as_str());
-        if s.trim().is_empty() || s == "auto" {
-            return None;
+        if s.trim().is_empty() || s.trim() == "auto" {
+            return Ok(None);
         }
-        s.parse().ok()
+        s.parse().map(Some).map_err(|_| s.to_string())
     }
 
     pub fn model_config(&self) -> pmx_engines::ModelConfig {
@@ -126,7 +140,8 @@ pub fn path() -> PathBuf {
     }
 }
 
-/// Missing or unreadable file: defaults (an unreadable file is left alone, not overwritten until a save).
+/// Missing or unreadable file: defaults. A file that cannot be parsed is copied to `settings.json.bad-<unix time>`
+/// first (once per distinct content), so the next save does not lose it.
 /// Also hands the model choice to the engines, so every reader of the settings uses the same models.
 pub fn load() -> Settings {
     let s = load_from(&path());
@@ -137,10 +152,34 @@ pub fn load() -> Settings {
 pub fn load_from(p: &Path) -> Settings {
     match std::fs::read(p) {
         Ok(raw) => serde_json::from_slice(&raw).unwrap_or_else(|e| {
-            crate::log::log(&format!("settings: could not read {} ({e}); using defaults", p.display()));
+            let kept = keep_bad_copy(p, &raw);
+            crate::log::log(&format!("settings: could not read {} ({e}); using defaults{kept}", p.display()));
             Settings::default()
         }),
         Err(_) => Settings::default(),
+    }
+}
+
+/// Copy an unparsable settings file next to it, unless a copy with the same bytes is already there.
+/// Returns a note for the log.
+fn keep_bad_copy(p: &Path, raw: &[u8]) -> String {
+    let (Some(dir), Some(name)) = (p.parent(), p.file_name().and_then(|n| n.to_str())) else { return String::new() };
+    let prefix = format!("{name}.bad-");
+    let already = std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| {
+        e.file_name().to_str().is_some_and(|n| n.starts_with(&prefix)) && std::fs::read(e.path()).is_ok_and(|b| b == raw)
+    });
+    if already {
+        return String::new();
+    }
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let bad = dir.join(format!("{prefix}{secs}"));
+    let r = crate::paths::private_file(&bad, true).and_then(|mut f| {
+        use std::io::Write;
+        f.write_all(raw)
+    });
+    match r {
+        Ok(()) => format!(" (old file kept as {})", bad.display()),
+        Err(e) => format!(" (could not keep a copy: {e})"),
     }
 }
 
@@ -188,14 +227,44 @@ mod tests {
     #[test]
     fn engine_pref_per_key_wins_over_overall() {
         let mut s = Settings::default();
-        assert_eq!(s.engine_pref(Level::Standard), None);
+        assert_eq!(s.engine_pref(Level::Standard), Ok(None));
         s.engine = "chatgpt-plan".into();
-        assert_eq!(s.engine_pref(Level::Max), Some(EngineId::ChatGptPlan));
+        assert_eq!(s.engine_pref(Level::Max), Ok(Some(EngineId::ChatGptPlan)));
         s.engine_fast = Some("claude-plan".into());
-        assert_eq!(s.engine_pref(Level::Standard), Some(EngineId::ClaudePlan));
-        assert_eq!(s.engine_pref(Level::Max), Some(EngineId::ChatGptPlan));
+        assert_eq!(s.engine_pref(Level::Standard), Ok(Some(EngineId::ClaudePlan)));
+        assert_eq!(s.engine_pref(Level::Max), Ok(Some(EngineId::ChatGptPlan)));
         s.engine_max = Some(String::new());
-        assert_eq!(s.engine_pref(Level::Max), Some(EngineId::ChatGptPlan));
+        assert_eq!(s.engine_pref(Level::Max), Ok(Some(EngineId::ChatGptPlan)));
+    }
+
+    #[test]
+    fn unknown_pinned_engine_picks_nothing() {
+        let ready = |id: EngineId| pmx_engines::EngineStatus {
+            id, label: String::new(), ready: true, detail: String::new(),
+            fast_model: String::new(), max_model: String::new(), default_fast: String::new(), default_max: String::new(),
+        };
+        let st = [ready(EngineId::ClaudePlan)];
+        let mut s = Settings::default();
+        assert_eq!(s.pick_engine(Level::Standard, &st), Some(EngineId::ClaudePlan));
+        s.engine_fast = Some("mistral-plan".into());
+        assert!(s.engine_pref(Level::Standard).is_err());
+        assert_eq!(s.pick_engine(Level::Standard, &st), None);
+        assert_eq!(s.pick_engine(Level::Max, &st), Some(EngineId::ClaudePlan));
+    }
+
+    #[test]
+    fn corrupt_file_is_kept_once() {
+        let dir = std::env::temp_dir().join(format!("pmx-settings-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("settings.json");
+        std::fs::write(&p, "{ not json").unwrap();
+        assert_eq!(load_from(&p), Settings::default());
+        assert_eq!(load_from(&p), Settings::default());
+        let bad: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("settings.json.bad-")).collect();
+        assert_eq!(bad.len(), 1);
+        assert_eq!(std::fs::read(bad[0].path()).unwrap(), b"{ not json");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]
