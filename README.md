@@ -71,17 +71,18 @@ text is replaced with a strong prompt written for the AI it is going to and the 
 
 | Engine | Needs | Fast key | Max key |
 |---|---|---|---|
-| Any model (OpenAI-compatible API) | An API address and a model name; a key only if the service needs one (stored in the macOS Keychain) | your pick | your pick (empty: same as fast) |
 | Anthropic API key | An API key from the Anthropic Console (stored in the macOS Keychain) | `claude-haiku-5-5` | `claude-sonnet-5-5` |
 | Claude plan | [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and signed in (`claude`) | `haiku` | `sonnet` |
 | ChatGPT plan | [Codex CLI](https://github.com/openai/codex) installed and signed in (`codex`) | `gpt-6.2-sol` | `gpt-6.2-astra` |
 | Google account (experimental) | Gemini CLI installed and signed in (`gemini`) | `flash` | `pro` |
+| Any model (OpenAI-compatible API) | An API address and a model name; a key only if the service needs one (stored in the macOS Keychain) | your pick | your pick (empty: same as fast) |
 
 The models in the table are the built-in ones. Settings > Engine > Model names replaces any of them with another
 model name the engine accepts (for example `opus` for the Claude plan max key).
 
-On Auto, the first ready engine in that order is used. "Any model" is ready only after you set it up, so setting it
-up makes it the Auto pick. You can pin an engine per key in Settings; a pinned engine
+On Auto, the first ready engine in that order is used. "Any model" comes last: it counts as ready as soon as an
+address and a model name are filled in, so Auto uses it only when no other engine is ready. Pin it to use it first.
+You can pin an engine per key in Settings; a pinned engine
 that is not ready is never swapped for another one, so no other account is billed silently.
 
 The CLI engines run in a scratch folder in your per-user temp folder, with your own `CLAUDE.md`/`AGENTS.md` and
@@ -174,7 +175,7 @@ How it differs from macOS:
 - No Accessibility permission: the first-run screens skip that step.
 - The menu bar icon is a system tray icon.
 - API keys are stored in Windows Credential Manager (generic credentials `promptmaxxer:anthropic` and
-  `promptmaxxer:custom-api`).
+  `promptmaxxer:custom-api:<host>`).
 - Files: settings, history, briefs and the log are in `%APPDATA%\promptmaxxer`.
 - Project context: Windows offers no clean way to read a terminal's working folder, so there is no automatic
   project brief. Pin a project in Settings to use one.
@@ -215,7 +216,9 @@ Reports go to `evals/results/` (not tracked).
 - What is sent: the highlighted text, the app name and target, the cached project brief, and the rulebook.
   The highlighted text is sent as it is: do not highlight secrets. The project instruction files are scrubbed of
   keys and passwords before they are summarised, and the brief is scrubbed again.
-- API keys are stored in the macOS login Keychain (service `promptmaxxer`, accounts `anthropic` and `custom-api`;
+- API keys are stored in the macOS login Keychain (service `promptmaxxer`, accounts `anthropic` and
+  `custom-api:<host>`, one per API address host; that key is sent only to that host, and never over plain `http://`
+  except to this computer;
   on Windows: Credential Manager),
   never in a file or a log.
 - Files on your Mac:

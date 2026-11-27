@@ -245,6 +245,16 @@ pub(crate) fn share_file(target: &Path, link: &Path) -> std::io::Result<()> {
     std::fs::copy(target, link).map(|_| ())
 }
 
+/// Unix: link `link` to `target`. Two runs that set up the same scratch home at once can both remove the
+/// old link and both create it; the second then finds the right link already there, which is fine.
+#[cfg(unix)]
+pub(crate) fn symlink_shared(target: &Path, link: &Path) -> std::io::Result<()> {
+    match std::os::unix::fs::symlink(target, link) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && std::fs::read_link(link).ok().as_deref() == Some(target) => Ok(()),
+        r => r,
+    }
+}
+
 /// Folder the quick status checks run in: `/tmp` on macOS, the per-user temp folder on Windows.
 pub(crate) fn status_dir() -> PathBuf {
     if cfg!(windows) {

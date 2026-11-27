@@ -49,14 +49,15 @@ def clean(text: str) -> str:
 
 
 # Openers that are always a comment, never a prompt.
-ALWAYS_BAD = re.compile(r"\A\s*(I'?m Prompt[ -]?maxxer|As Prompt[ -]?maxxer|The user|The draft|This draft|Here(?:'s| is) (?:the|your|a|an) "
+ALWAYS_BAD = re.compile(r"\A\s*(I'?m Prompt[ -]?maxxer|As Prompt[ -]?maxxer|"
+                        r"The (?:user|person) (?:wants|is asking|has asked|asked|would like|is requesting|needs you)|(?:The|This) draft (?:is|asks|seems|wants|appears|looks|reads)|Here(?:'s| is) (?:the|your|a|an) "
                         r"(?:rewritten|improved|enhanced|better|stronger)|I'?ll rewrite|I need the draft)", re.I)
 # Refusal openers. Bad only when the first lines also talk about the rewrite job, since a real
 # first-person prompt can start with "I can't get my login to work".
 REFUSAL_START = re.compile(r"\A\s*(I'?m sorry|I am sorry|Sorry|Apologies|I apologi[sz]e|Unfortunately|I can'?t|I cannot|"
                            r"I won'?t|I will not|I'?m not|I am not|I'?d need|I would need|Could you|Can you paste|Please (?:paste|send|provide))", re.I)
 # Phrases that only appear when the model talks about itself or the tool.
-ROLE_TALK = re.compile(r"Prompt[ -]?maxxer|\bmy role\b|prompt rewrite|\byour draft\b|the draft you|run (?:it|this) again", re.I)
+ROLE_TALK = re.compile(r"Prompt[ -]?maxxer|\bmy role\b|prompt rewrite|\byour draft\b[^.\n]{0,40}(?:rewr(?:it|ot)|prompt)|(?:rewr(?:it|ot)|prompt)[^.\n]{0,40}\byour draft\b|the draft you|run (?:it|this) again", re.I)
 JOB_TALK = re.compile(r"draft|rewrit|Prompt[ -]?maxxer|environment block|email block|system block|paste (?:just|the|your)", re.I)
 
 

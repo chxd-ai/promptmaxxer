@@ -11,11 +11,15 @@ BAD = ["I'm sorry, but I can't produce that rewrite. The message you sent contai
        "I'm sorry, but I can't write out that rewritten prompt, since the draft is a request",
        "I'm Promptmaxxer, so I only rewrite prompts and don't create logos myself.",
        "Here is the improved prompt:\nDo X", "The user wants a logo for Crumb.", "",
-       "I'm going to hold to my role here, so this isn't a prompt rewrite. Your draft is a question"]
+       "I'm going to hold to my role here, so this isn't a prompt rewrite. Your draft is a question",
+       "The user is asking for a login fix.", "The draft seems to be about a login page.",
+       "Fix the login page. I rewrote your draft to be clearer."]
 GOOD = ["I can't get the login page to work on mobile. Find out why and fix it.",
         "Run the test suite for this project and report the results.",
         "Rewrite this paragraph so it is clearer for a board audience.",
-        "Sorry to ask again: summarize this report in 5 bullets."]
+        "Sorry to ask again: summarize this report in 5 bullets.",
+        "The user clicks Save and nothing happens. Find out why the save handler does not fire and fix it.",
+        "Proofread your draft of the board letter and list every typo."]
 
 
 class Guard(unittest.TestCase):

@@ -41,19 +41,40 @@ impl CustomApi {
         format!("{b}/chat/completions")
     }
 
-    /// The host for status lines ("openrouter.ai", "localhost:11434"). Never the path or a key.
-    pub fn host(&self) -> String {
-        let b = self.base_url.trim();
-        let rest = b.split_once("://").map(|(_, r)| r).unwrap_or(b);
-        let host = rest.split('/').next().unwrap_or(rest);
-        host.rsplit('@').next().unwrap_or(host).to_string()
+    fn url(&self) -> Option<reqwest::Url> {
+        reqwest::Url::parse(&self.endpoint()).ok()
     }
 
-    /// True for a server on this Mac: no key is needed, and nothing leaves the machine.
+    /// The host (and port) the calls go to, lowercase: "openrouter.ai", "localhost:11434". Never the
+    /// path or a user name or key. Empty when the address cannot be read.
+    pub fn host(&self) -> String {
+        let Some(u) = self.url() else { return String::new() };
+        let h = u.host_str().unwrap_or("").to_lowercase();
+        match u.port() {
+            Some(p) if !h.is_empty() => format!("{h}:{p}"),
+            _ => h,
+        }
+    }
+
+    /// True for a server on this computer: no key is needed, and nothing leaves the machine.
     pub fn is_local(&self) -> bool {
-        let h = self.host();
-        let h = h.split(':').next().unwrap_or(&h);
-        matches!(h, "localhost" | "127.0.0.1" | "[::1]" | "::1")
+        let Some(u) = self.url() else { return false };
+        matches!(u.host_str().map(str::to_lowercase).as_deref(), Some("localhost" | "127.0.0.1" | "[::1]"))
+    }
+
+    pub fn is_https(&self) -> bool {
+        self.url().is_some_and(|u| u.scheme() == "https")
+    }
+
+    /// A key may be sent only over https, or to a server on this computer.
+    pub fn key_allowed(&self) -> bool {
+        self.is_https() || self.is_local()
+    }
+
+    /// Keychain account for this address's key: `custom-api:<host>`. The key is only ever sent to
+    /// the host it was saved for, so a later address change never takes the key along.
+    pub fn key_account(&self) -> String {
+        format!("{}:{}", crate::CUSTOM_KEY, self.host())
     }
 }
 
@@ -95,6 +116,23 @@ mod tests {
         assert!(!c("https://api.openai.com/v1").is_local());
         assert!(!CustomApi::default().is_set());
         assert!(c("http://localhost:11434/v1").is_set());
+        assert!(c("http://[::1]:8080/v1").is_local());
+        assert_eq!(c("HTTPS://API.OpenAI.com/v1").host(), "api.openai.com");
+        assert_eq!(c("not a url").host(), "");
+    }
+
+    #[test]
+    fn key_rules() {
+        let c = |u: &str| CustomApi { base_url: u.into(), fast_model: "m".into(), max_model: String::new() };
+        assert!(c("https://openrouter.ai/api/v1").key_allowed());
+        assert!(c("http://localhost:11434/v1").key_allowed());
+        assert!(!c("http://openrouter.ai/api/v1").key_allowed());
+        assert!(!c("http://192.168.1.5:1234/v1").key_allowed());
+        assert_eq!(c("https://openrouter.ai/api/v1").key_account(), "custom-api:openrouter.ai");
+        assert_eq!(c("http://localhost:1234/v1").key_account(), "custom-api:localhost:1234");
+        // A user name in the address does not change where the key goes.
+        assert_eq!(c("https://openrouter.ai@evil.example/v1").key_account(), "custom-api:evil.example");
+        assert_ne!(c("https://evil.example/v1").key_account(), c("https://openrouter.ai/api/v1").key_account());
     }
 
     #[test]

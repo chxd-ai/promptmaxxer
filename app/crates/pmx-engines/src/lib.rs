@@ -1,8 +1,7 @@
 //! pmx-engines: turn a rough prompt into a strong one with whichever AI the person already has.
 //!
-//! Engines, in default pick order: `custom-api` (any OpenAI-compatible API, cloud or local),
-//! `anthropic-key` (API key in the keychain), `claude-plan` (Claude Code CLI), `chatgpt-plan` (Codex CLI),
-//! `gemini-plan` (Gemini CLI). The model each engine uses can be changed: see [`models`]. [`detect_all`] says which are ready,
+//! Engines, in default pick order: `anthropic-key` (API key in the keychain), `claude-plan` (Claude Code CLI),
+//! `chatgpt-plan` (Codex CLI), `gemini-plan` (Gemini CLI), `custom-api` (any OpenAI-compatible API, cloud or local). The model each engine uses can be changed: see [`models`]. [`detect_all`] says which are ready,
 //! [`pick`] chooses one, [`run`] streams the rewrite as [`Event`]s and returns the [`Outcome`].
 //!
 //! Event order for one [`run`]: `Started`, `Delta`*, then `Done` or `Failed`. If the first reply is a
@@ -57,8 +56,9 @@ pub enum EngineId {
 }
 
 impl EngineId {
-    /// Default pick order. `custom-api` is ready only once someone set it up, so it comes first.
-    pub const ALL: [EngineId; 5] = [EngineId::CustomApi, EngineId::AnthropicKey, EngineId::ClaudePlan, EngineId::ChatGptPlan, EngineId::GeminiPlan];
+    /// Default pick order for Auto. `custom-api` is last: an address and a model name are enough to make it
+    /// "ready", so it must not take over every press from an engine the person signed in to.
+    pub const ALL: [EngineId; 5] = [EngineId::AnthropicKey, EngineId::ClaudePlan, EngineId::ChatGptPlan, EngineId::GeminiPlan, EngineId::CustomApi];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -249,16 +249,37 @@ fn status(id: EngineId, ready: bool, detail: impl Into<String>) -> EngineStatus 
     }
 }
 
-/// Keychain account for the `custom-api` key (optional: local servers need none).
+/// Provider name of the `custom-api` key. The keychain account is per host: [`CustomApi::key_account`].
+/// A key saved under the bare `custom-api` account (older builds) is not read: it cannot be tied to a host.
 pub const CUSTOM_KEY: &str = "custom-api";
+
+/// The key for this `custom-api` setup: the given one, else the one saved for its host. Err when a key
+/// would go over plain http to another computer.
+fn custom_key(cfg: &CustomApi, given: Option<String>) -> Result<Option<String>, EngineError> {
+    let key = given.or_else(|| keychain::get(&cfg.key_account()));
+    if key.is_some() && !cfg.key_allowed() {
+        return Err(EngineError::NotReady(
+            "Any model: a key is only sent over https:// (or to this computer). Change the API address to https://".into(),
+        ));
+    }
+    Ok(key)
+}
+
+fn custom_status(c: &CustomApi, key_saved: bool) -> EngineStatus {
+    let id = EngineId::CustomApi;
+    if !c.is_set() {
+        return status(id, false, "Not set up");
+    }
+    if key_saved && !c.key_allowed() {
+        return status(id, false, format!("{}: key saved, but the address is not https", c.host()));
+    }
+    status(id, true, format!("{}{}", c.host(), if key_saved { ", key saved" } else { "" }))
+}
 
 fn detect_custom() -> EngineStatus {
     let c = models::current().custom;
-    if !c.is_set() {
-        return status(EngineId::CustomApi, false, "Not set up");
-    }
-    let key = if keychain::get(CUSTOM_KEY).is_some() { ", key saved" } else { "" };
-    status(EngineId::CustomApi, true, format!("{}{key}", c.host()))
+    let saved = c.is_set() && keychain::get(&c.key_account()).is_some();
+    custom_status(&c, saved)
 }
 
 fn detect_anthropic() -> EngineStatus {
@@ -273,6 +294,7 @@ fn detect_claude() -> EngineStatus {
     let Some(cli) = paths::find_cli("claude") else { return status(id, false, "CLI not found") };
     let mut c = paths::std_command(&cli);
     c.args(["auth", "status", "--json"]).current_dir(paths::status_dir()).env("PATH", paths::child_path(&cli));
+    claude::no_api_key(&mut c);
     match quick_output(c).and_then(|(_, out)| claude::parse_auth_status(&out)) {
         Some(true) => status(id, true, "Signed in"),
         Some(false) => status(id, false, "Not signed in"),
@@ -307,12 +329,13 @@ fn detect_gemini() -> EngineStatus {
 /// Which engines are ready. No model calls; the checks run in parallel (about 0.2 s here).
 pub fn detect_all() -> Vec<EngineStatus> {
     std::thread::scope(|s| {
+        // Same order as `EngineId::ALL`.
         let hs = [
-            s.spawn(detect_custom),
             s.spawn(detect_anthropic),
             s.spawn(detect_claude),
             s.spawn(detect_codex),
             s.spawn(detect_gemini),
+            s.spawn(detect_custom),
         ];
         hs.into_iter()
             .zip(EngineId::ALL)
@@ -456,7 +479,7 @@ async fn call_raw(
             if !cfg.is_set() {
                 return Err(EngineError::NotReady("Any model: set the API address and model name in Settings".into()));
             }
-            let key = opts.custom_key.clone().or_else(|| keychain::get(CUSTOM_KEY));
+            let key = custom_key(&cfg, opts.custom_key.clone())?;
             openai::call(&cfg.endpoint(), key.as_deref(), model, system, &user, tx, cancel, timeout).await
         }
         EngineId::AnthropicKey => {
@@ -487,8 +510,8 @@ async fn call_raw(
             let cli = opts.cli.clone().or_else(|| paths::find_cli("gemini")).ok_or_else(|| not_found("Gemini"))?;
             let home = gemini::scratch_home();
             gemini::prepare_home(&gemini::real_dir(), &home).map_err(|e| EngineError::Cli(format!("could not set up the Gemini folder: {e}")))?;
-            let cmd = gemini::command(&cli, model, &fw_file()?, &home, &user);
-            proc::run_cli(cmd, None, &mut gemini::Parser::default(), tx, cancel, timeout).await
+            let cmd = gemini::command(&cli, model, &fw_file()?, &home);
+            proc::run_cli(cmd, Some(user), &mut gemini::Parser::default(), tx, cancel, timeout).await
         }
     }
 }
@@ -555,7 +578,7 @@ mod tests {
 
     #[test]
     fn pick_auto_and_pinned() {
-        let s = [st(EngineId::CustomApi, false), st(EngineId::AnthropicKey, false), st(EngineId::ClaudePlan, true), st(EngineId::ChatGptPlan, true), st(EngineId::GeminiPlan, false)];
+        let s = [st(EngineId::CustomApi, true), st(EngineId::AnthropicKey, false), st(EngineId::ClaudePlan, true), st(EngineId::ChatGptPlan, true), st(EngineId::GeminiPlan, false)];
         assert_eq!(pick(None, &s), Some(EngineId::ClaudePlan));
         assert_eq!(pick(Some(EngineId::ChatGptPlan), &s), Some(EngineId::ChatGptPlan));
         assert_eq!(pick(Some(EngineId::GeminiPlan), &s), None);
@@ -564,6 +587,24 @@ mod tests {
         // Order comes from the default order, not the slice order.
         let rev = [st(EngineId::GeminiPlan, true), st(EngineId::AnthropicKey, true)];
         assert_eq!(pick(None, &rev), Some(EngineId::AnthropicKey));
+        // A set-up custom API is used on Auto only when nothing else is ready.
+        assert_eq!(pick(None, &[st(EngineId::CustomApi, true), st(EngineId::GeminiPlan, true)]), Some(EngineId::GeminiPlan));
+        assert_eq!(pick(None, &[st(EngineId::CustomApi, true)]), Some(EngineId::CustomApi));
+        assert_eq!(EngineId::ALL.last(), Some(&EngineId::CustomApi));
+    }
+
+    #[test]
+    fn custom_key_never_goes_over_plain_http_to_another_host() {
+        let c = |u: &str| CustomApi { base_url: u.into(), fast_model: "m".into(), max_model: String::new() };
+        assert!(custom_key(&c("http://api.example.com/v1"), Some("k".into())).is_err());
+        assert_eq!(custom_key(&c("https://api.example.com/v1"), Some("k".into())).unwrap().as_deref(), Some("k"));
+        assert_eq!(custom_key(&c("http://localhost:11434/v1"), Some("k".into())).unwrap().as_deref(), Some("k"));
+        assert!(custom_status(&c("http://api.example.com/v1"), true).detail.contains("not https"));
+        assert!(!custom_status(&c("http://api.example.com/v1"), true).ready);
+        let ok = custom_status(&c("https://openrouter.ai/api/v1"), true);
+        assert!(ok.ready && ok.detail == "openrouter.ai, key saved", "{ok:?}");
+        assert_eq!(custom_status(&c("http://localhost:11434/v1"), false).detail, "localhost:11434");
+        assert_eq!(custom_status(&CustomApi::default(), false).detail, "Not set up");
     }
 
     #[test]

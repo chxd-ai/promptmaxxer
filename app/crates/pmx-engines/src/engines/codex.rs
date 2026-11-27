@@ -53,7 +53,7 @@ pub(crate) fn prepare_home(real: &Path, scratch: &Path) -> std::io::Result<()> {
         #[cfg(unix)]
         {
             let _ = std::fs::remove_file(&link);
-            std::os::unix::fs::symlink(&target, &link)?;
+            crate::paths::symlink_shared(&target, &link)?;
         }
     }
     // Never let a global instructions file sit in the scratch home.
@@ -114,7 +114,8 @@ pub(crate) fn parse_login_status(out: &str) -> (bool, &'static str) {
     } else if o.contains("not logged in") {
         (false, "Not signed in")
     } else if o.contains("logged in using an api key") || o.contains("api key") {
-        (true, "Signed in with an API key, not ChatGPT")
+        // An API key bills per call: never use it for the "ChatGPT plan" engine.
+        (false, "Signed in with an API key, not a ChatGPT plan")
     } else if o.contains("logged in") {
         (true, "Signed in")
     } else {
@@ -197,7 +198,7 @@ mod tests {
     fn login_status_texts() {
         assert_eq!(parse_login_status("Logged in using ChatGPT\n"), (true, "Signed in"));
         assert_eq!(parse_login_status("Not logged in\n"), (false, "Not signed in"));
-        assert!(parse_login_status("Logged in using an API key - sk-****").0);
+        assert_eq!(parse_login_status("Logged in using an API key - sk-****"), (false, "Signed in with an API key, not a ChatGPT plan"));
     }
 
     #[test]
