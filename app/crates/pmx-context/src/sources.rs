@@ -195,7 +195,7 @@ mod tests {
         let p = project(&fx);
         let got: Vec<(String, String, SourceLevel)> = sources_with_home(Some(&p), &SourcePrefs::all_on(), &fx.home)
             .into_iter()
-            .map(|s| (s.path.strip_prefix(fx.home.parent().unwrap()).unwrap().to_string_lossy().into_owned(), s.label, s.level))
+            .map(|s| (s.path.strip_prefix(fx.home.parent().unwrap()).unwrap().to_string_lossy().replace('\\', "/"), s.label, s.level))
             .collect();
         let mem_root = format!("home/.claude/projects/{}/memory/MEMORY.md", claude_project_dir_name(&fx.root));
         let mem_cwd = format!("home/.claude/projects/{}/memory/MEMORY.md", claude_project_dir_name(&fx.cwd));
