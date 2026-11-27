@@ -1,4 +1,6 @@
 //! The menu bar icon and menu: title, current engine, Settings…, History…, Quit. No Dock icon.
+//! Windows: the same menu on a system tray icon (the app icon in colour: the black template glyph would vanish on
+//! a dark taskbar).
 use crate::log::log;
 use std::sync::OnceLock;
 use tauri::image::Image;
@@ -17,15 +19,19 @@ pub fn set_engine_label(text: &str) {
 pub fn build(app: &App) -> tauri::Result<()> {
     let title = MenuItem::with_id(app, "title", "promptmaxxer", false, None::<&str>)?;
     let eng = MenuItem::with_id(app, "engine", "Engine: checking…", false, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("Cmd+,"))?;
+    let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
     let history = MenuItem::with_id(app, "history", "History…", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("Cmd+Q"))?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
     let (s1, s2) = (PredefinedMenuItem::separator(app)?, PredefinedMenuItem::separator(app)?);
     let menu = Menu::with_items(app, &[&title, &eng, &s1, &settings, &history, &s2, &quit])?;
     let _ = ENGINE_ITEM.set(eng);
+    #[cfg(not(windows))]
+    let icon = Image::from_bytes(include_bytes!("../icons/tray-36.png"))?;
+    #[cfg(windows)]
+    let icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
     TrayIconBuilder::with_id("promptmaxxer")
-        .icon(Image::from_bytes(include_bytes!("../icons/tray-36.png"))?)
-        .icon_as_template(true)
+        .icon(icon)
+        .icon_as_template(cfg!(not(windows)))
         .tooltip("promptmaxxer")
         .menu(&menu)
         .show_menu_on_left_click(true)

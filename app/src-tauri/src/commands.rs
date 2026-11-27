@@ -14,8 +14,10 @@ pub fn get_settings() -> Settings {
 }
 
 #[tauri::command]
-pub fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
+pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), String> {
     let old = settings::load();
+    // A Settings window opened before onboarding finished still holds `onboarded: false`: never undo it.
+    keep_onboarded(&old, &mut settings);
     // Set the keys first: a pair that cannot be set is never saved, and the old keys stay on.
     if old.fast_key != settings.fast_key || old.max_key != settings.max_key {
         crate::keys::apply(&app, &settings.fast_key, &settings.max_key)
@@ -27,10 +29,19 @@ pub fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
         let r = if settings.start_at_login { al.enable() } else { al.disable() };
         log(&format!("settings: start at login {} ({})", settings.start_at_login, if r.is_ok() { "ok" } else { "failed" }));
     }
-    if old.engine != settings.engine || old.engine_fast != settings.engine_fast {
+    if old.engine != settings.engine
+        || old.engine_fast != settings.engine_fast
+        || old.engine_max != settings.engine_max
+        || old.models != settings.models
+        || old.custom_api != settings.custom_api
+    {
         tauri::async_runtime::spawn_blocking(press::refresh_statuses);
     }
     Ok(())
+}
+
+fn keep_onboarded(old: &Settings, new: &mut Settings) {
+    new.onboarded |= old.onboarded;
 }
 
 #[tauri::command]
@@ -58,13 +69,24 @@ pub async fn test_engine(engine: String) -> Value {
 }
 
 /// Checks the key with one real call before it is saved; a key that fails is never stored.
+/// `provider`: "anthropic", or "custom-api" for the any-model engine (any key format). A custom-api key is
+/// saved for the host of the API address set now (`custom-api:<host>`) and only ever sent there.
 #[tauri::command]
 pub async fn save_api_key(provider: String, key: String) -> Value {
-    if provider != "anthropic" {
-        return json!({"ok": false, "error": "Only Anthropic keys are supported."});
+    if provider != "anthropic" && provider != pmx_engines::CUSTOM_KEY {
+        return json!({"ok": false, "error": "Unknown key type."});
     }
     let key = key.trim().to_string();
-    if !key.starts_with("sk-ant-") {
+    let custom = provider == pmx_engines::CUSTOM_KEY;
+    let custom_api = settings::load().custom_api;
+    if custom && !custom_api.is_set() {
+        return json!({"ok": false, "error": "Fill in the API address and the model first."});
+    }
+    if custom && !custom_api.key_allowed() {
+        return json!({"ok": false, "error": "A key is only sent over https:// (or to this computer). Change the API address to https:// first."});
+    }
+    let account = if custom { custom_api.key_account() } else { provider.clone() };
+    if !custom && !key.starts_with("sk-ant-") {
         return json!({"ok": false, "error": "That doesn't look like an Anthropic key. It starts with sk-ant-."});
     }
     let fw = crate::paths::framework().unwrap_or_default();
@@ -77,9 +99,14 @@ pub async fn save_api_key(provider: String, key: String) -> Value {
         framework: fw,
     };
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let opts = pmx_engines::RunOptions { anthropic_key: Some(key.clone()), ..Default::default() };
-    match pmx_engines::run_with(EngineId::AnthropicKey, req, tx, CancellationToken::new(), opts).await {
-        Ok(_) => match pmx_engines::keychain::set("anthropic", &key) {
+    let (engine, opts) = if custom {
+        // The setup read above: the key is checked against the same host it is saved for.
+        (EngineId::CustomApi, pmx_engines::RunOptions { custom: Some(custom_api.clone()), custom_key: Some(key.clone()), ..Default::default() })
+    } else {
+        (EngineId::AnthropicKey, pmx_engines::RunOptions { anthropic_key: Some(key.clone()), ..Default::default() })
+    };
+    match pmx_engines::run_with(engine, req, tx, CancellationToken::new(), opts).await {
+        Ok(_) => match pmx_engines::keychain::set(&account, &key) {
             Ok(()) => {
                 log("save_api_key: key checked and saved in the Keychain");
                 tauri::async_runtime::spawn_blocking(press::refresh_statuses);
@@ -94,50 +121,68 @@ pub async fn save_api_key(provider: String, key: String) -> Value {
     }
 }
 
+/// "custom-api" deletes the key saved for the host of the API address set now, and the old host-less
+/// `custom-api` item that earlier builds saved (it is never read).
 #[tauri::command]
 pub fn delete_api_key(provider: String) -> Result<(), String> {
-    if provider != "anthropic" {
+    if provider != "anthropic" && provider != pmx_engines::CUSTOM_KEY {
         return Ok(());
     }
-    pmx_engines::keychain::delete("anthropic").map_err(|e| e.to_string())?;
+    if provider == pmx_engines::CUSTOM_KEY {
+        pmx_engines::keychain::delete(&settings::load().custom_api.key_account()).map_err(|e| e.to_string())?;
+    }
+    pmx_engines::keychain::delete(&provider).map_err(|e| e.to_string())?;
     log("delete_api_key: removed from the Keychain");
     tauri::async_runtime::spawn_blocking(press::refresh_statuses);
     Ok(())
 }
 
+// History commands are async and do the file work on a blocking thread, so the UI thread never waits on disk.
+
 #[tauri::command]
-pub fn history_list(query: String) -> Vec<Value> {
-    history::list(&history::path(), &query)
+pub async fn history_list(query: String) -> Vec<Value> {
+    tauri::async_runtime::spawn_blocking(move || history::list(&history::path(), &query)).await.unwrap_or_default()
 }
 
 #[tauri::command]
-pub fn history_delete(id: Option<String>) -> Result<(), String> {
-    history::delete(&history::path(), id.as_deref()).map_err(|e| e.to_string())
+pub async fn history_delete(id: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || history::delete(&history::path(), id.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn history_copy(id: String) -> bool {
-    match history::get(&history::path(), &id).and_then(|v| v.get("output").and_then(Value::as_str).map(str::to_string)) {
+pub async fn history_copy(id: String) -> bool {
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        history::get(&history::path(), &id).and_then(|v| v.get("output").and_then(Value::as_str).map(str::to_string))
+    })
+    .await
+    .ok()
+    .flatten();
+    match out {
         Some(out) if !out.is_empty() => mac::set_clipboard_text(&out),
         _ => false,
     }
 }
 
+/// False when the row is gone or a press is running (nothing starts then).
 #[tauri::command]
-pub fn history_rerun(id: String, level: String) -> bool {
+pub async fn history_rerun(id: String, level: String) -> bool {
     let level = if level == "max" { Level::Max } else { Level::Standard };
-    match history::get(&history::path(), &id) {
-        Some(item) => {
-            press::rerun(item, level);
-            true
-        }
+    let item = tauri::async_runtime::spawn_blocking(move || history::get(&history::path(), &id)).await.ok().flatten();
+    match item {
+        Some(item) => press::rerun(item, level),
         None => false,
     }
 }
 
 #[tauri::command]
-pub fn history_thumb(id: String, up: Option<bool>) -> Result<bool, String> {
-    history::thumb(&history::path(), &id, up).map_err(|e| e.to_string())
+pub async fn history_thumb(id: String, up: Option<bool>) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || history::thumb(&history::path(), &id, up))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -183,9 +228,9 @@ pub async fn bar_undo(app: AppHandle) -> bool {
 }
 
 #[tauri::command]
-pub fn bar_thumb(up: bool) -> bool {
+pub async fn bar_thumb(up: bool) -> bool {
     let Some(id) = press::last().and_then(|l| l.history_id) else { return false };
-    history::thumb(&history::path(), &id, Some(up)).unwrap_or(false)
+    tauri::async_runtime::spawn_blocking(move || history::thumb(&history::path(), &id, Some(up)).unwrap_or(false)).await.unwrap_or(false)
 }
 
 #[tauri::command]
@@ -201,4 +246,35 @@ pub fn open_history(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn context_preview() -> crate::context::Preview {
     press::preview()
+}
+
+/// "macos" or "windows". The UI skips the Accessibility step and shows Windows key names (Ctrl, Alt) on Windows.
+#[tauri::command]
+pub fn app_platform() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else {
+        "macos"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn onboarded_is_never_undone_by_a_save() {
+        let mut old = Settings::default();
+        old.onboarded = true;
+        let mut stale = Settings::default();
+        keep_onboarded(&old, &mut stale);
+        assert!(stale.onboarded);
+        let mut fresh = Settings::default();
+        fresh.onboarded = true;
+        keep_onboarded(&Settings::default(), &mut fresh);
+        assert!(fresh.onboarded);
+        let mut neither = Settings::default();
+        keep_onboarded(&Settings::default(), &mut neither);
+        assert!(!neither.onboarded);
+    }
 }

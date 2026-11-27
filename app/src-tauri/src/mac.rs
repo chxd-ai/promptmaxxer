@@ -71,6 +71,8 @@ fn focused_labels(pid: i32) -> Vec<String> {
         if !ok {
             return out;
         }
+        // The app-level timeout does not carry over to the element: a hung app would stall each read for 6 s.
+        AXUIElementSetMessagingTimeout(focused as AXUIElementRef, 0.15);
         for name in ["AXDescription", "AXTitle", "AXRoleDescription"] {
             let attr = CFString::new(name);
             let mut v: CFTypeRef = std::ptr::null();
@@ -244,6 +246,44 @@ pub fn ask_accessibility() -> bool {
         let dict = NSDictionary::from_slices(&[&*key], &[&*yes]);
         unsafe { AXIsProcessTrustedWithOptions(Retained::as_ptr(&dict).cast()) }
     })
+}
+
+/// Id of the front window of app `pid` (its frontmost on-screen normal window, from the window list; no
+/// permission needed for the number). `None` when it cannot be read.
+pub fn front_window(pid: i32) -> Option<u64> {
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::{CFString, CFStringRef};
+    use core_graphics::window::{
+        copy_window_info, kCGNullWindowID, kCGWindowLayer, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly, kCGWindowNumber,
+        kCGWindowOwnerPID,
+    };
+    autoreleasepool(|_| {
+        let list = copy_window_info(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID)?;
+        // Front to back.
+        for item in list.iter() {
+            // SAFETY: each item of the window list is a CFDictionary; get rule, the array keeps it alive.
+            let dict: CFDictionary<CFString, CFType> = unsafe { CFDictionary::wrap_under_get_rule(*item as CFDictionaryRef) };
+            let num = |k: CFStringRef| {
+                // SAFETY: the key constants are static CFStrings.
+                let key = unsafe { CFString::wrap_under_get_rule(k) };
+                dict.find(&key).and_then(|v| v.downcast::<CFNumber>()).and_then(|n| n.to_i64())
+            };
+            // SAFETY: reading extern statics.
+            let (owner, layer, number) = unsafe { (num(kCGWindowOwnerPID), num(kCGWindowLayer), num(kCGWindowNumber)) };
+            if owner == Some(pid as i64) && layer == Some(0) {
+                return number.map(|n| n as u64);
+            }
+        }
+        None
+    })
+}
+
+/// Bring an app to the front (used before a paste when our own window took the focus). `window` is for
+/// Windows; macOS brings the app's own front window back.
+pub fn activate_to(pid: i32, _window: Option<u64>) -> bool {
+    activate(pid)
 }
 
 /// Bring an app to the front (used before a paste when our own window took the focus).

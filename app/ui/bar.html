@@ -79,6 +79,7 @@ body{padding:14px 26px 26px 14px}
   $("#up").innerHTML = ICON.up; $("#down").innerHTML = ICON.down;
   let phase = "start", thumb = null, briefOpen = false, cur = {};
 
+  if ((await PMX.platform()) === "windows") $("#hUndo .kc").textContent = "Ctrl+Z";
   try { const s = await invoke("get_settings"); $("#maxKey").innerHTML = keyCaps(s.fast_key, "xs"); }
   catch (e) { $("#maxKey").innerHTML = keyCaps("Alt+Space", "xs"); }
 

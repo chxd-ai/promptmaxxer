@@ -12,14 +12,16 @@ struct Rules {
     url_password: Regex,
     quoted_assign: Regex,
     line_assign: Regex,
+    auth_token: Regex,
 }
 
 fn rules() -> &'static Rules {
     static R: OnceLock<Rules> = OnceLock::new();
     R.get_or_init(|| {
         let shapes = [
-            // Private key blocks (PEM, OpenSSH, PGP).
-            r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----",
+            // Private key blocks (PEM, OpenSSH, PGP). A block cut off before its END line (a partial
+            // selection) is removed to the end of the text.
+            r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|\z)",
             // Anthropic.
             r"\bsk-ant-[A-Za-z0-9_\-]{16,}",
             // OpenAI (sk-..., sk-proj-..., sk-svcacct-..., sk-admin-...).
@@ -55,12 +57,28 @@ fn rules() -> &'static Rules {
             r"(?i)\bbasic\s+[A-Za-z0-9+/]{12,}=*",
             // ClickUp personal tokens.
             r"\bpk_\d+_[A-Za-z0-9]{20,}\b",
+            // Groq, xAI, Perplexity.
+            r"\bgsk_[A-Za-z0-9]{20,}",
+            r"\bxai-[A-Za-z0-9]{20,}",
+            r"\bpplx-[A-Za-z0-9]{20,}",
+            // Shopify access tokens and shared secrets (also custom and private app tokens).
+            r"\bshp(?:at|ss|ca|pa)_[A-Fa-f0-9]{32,}",
+            // DigitalOcean personal, OAuth and refresh tokens.
+            r"\bdo[opr]_v1_[A-Fa-f0-9]{40,}",
+            // Notion, Supabase, Linear.
+            r"\bntn_[A-Za-z0-9]{30,}",
+            r"\bsbp_[A-Za-z0-9]{30,}",
+            r"\blin_api_[A-Za-z0-9]{30,}",
+            // Telegram bot tokens: bot id, colon, 35-character secret.
+            r"\b\d{6,12}:[A-Za-z0-9_\-]{35,}",
         ]
         .iter()
         .map(|p| Regex::new(p).expect("secret regex"))
         .collect();
         Rules {
             shapes,
+            // Authorization: Token <value> (Django REST, many APIs). The header name stays.
+            auth_token: Regex::new(r#"(?P<pre>(?i:\bauthorization)["']?[ \t]*[:=][ \t]*["']?(?i:token)[ \t]+)(?P<val>[A-Za-z0-9\-._~+/=]*[0-9][A-Za-z0-9\-._~+/=]*)"#).unwrap(),
             // scheme://user:password@host
             url_password: Regex::new(r"(?P<pre>\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^/\s:@]+:)(?P<pw>[^@\s/]+)@").unwrap(),
             // "token": "value"   api_key = 'value'   password: "value"
@@ -122,9 +140,22 @@ fn password_name(name: &str) -> bool {
     ["password", "passwd", "passphrase"].iter().any(|w| low.contains(w)) || words(name).iter().any(|w| w == "pwd" || w == "pin")
 }
 
+/// True for a password, secret or token name: a quoted value under such a name is removed even when it
+/// reads like words (`password = "correct horse battery"`).
+fn strict_name(name: &str) -> bool {
+    password_name(name)
+        || name.to_lowercase().contains("secret")
+        || words(name).iter().any(|w| matches!(w.as_str(), "token" | "pat" | "pwd"))
+}
+
 /// True when the value is clearly not a literal secret: empty, a number, a bool,
 /// a reference to another variable, a placeholder, or prose.
 fn harmless_value(v: &str) -> bool {
+    placeholder_value(v) || v.trim().trim_end_matches([',', ';']).trim().trim_matches(|c| c == '"' || c == '\'' || c == '`').split_whitespace().count() > 1
+}
+
+/// [`harmless_value`] without the prose rule.
+fn placeholder_value(v: &str) -> bool {
     let v = v.trim().trim_end_matches([',', ';']).trim();
     let unq = v.trim_matches(|c| c == '"' || c == '\'' || c == '`');
     if unq.is_empty() || unq == SECRET_MARK {
@@ -149,8 +180,7 @@ fn harmless_value(v: &str) -> bool {
     if low.contains("your") && (low.contains("key") || low.contains("token") || low.contains("secret") || low.contains("password")) {
         return true;
     }
-    // Prose ("see 1Password", "look in the Keychain") is not a secret.
-    unq.split_whitespace().count() > 1
+    false
 }
 
 /// Replace secrets in `text` with `[secret removed]`.
@@ -162,6 +192,13 @@ pub fn scrub_secrets(text: &str) -> String {
             out = re.replace_all(&out, SECRET_MARK).into_owned();
         }
     }
+    // A value needs a digit and 8+ characters: "Authorization: Token authentication" is prose, not a token.
+    out = r
+        .auth_token
+        .replace_all(&out, |c: &Captures| {
+            if c["val"].len() >= 8 { format!("{}{}", &c["pre"], SECRET_MARK) } else { c[0].to_string() }
+        })
+        .into_owned();
     out = r
         .url_password
         .replace_all(&out, |c: &Captures| {
@@ -177,7 +214,9 @@ pub fn scrub_secrets(text: &str) -> String {
         .quoted_assign
         .replace_all(&out, |c: &Captures| {
             let (name, val) = (&c["name"], &c["val"]);
-            if secret_name(name) && !harmless_value(val) {
+            // Prose ("see 1Password") is kept, except in quotes under a password, secret or token name.
+            let harmless = if strict_name(name) { placeholder_value(val) } else { harmless_value(val) };
+            if secret_name(name) && !harmless {
                 format!("{}{}{}", &c["pre"], SECRET_MARK, &c["q2"])
             } else {
                 c[0].to_string()
@@ -315,6 +354,60 @@ mod tests {
         assert_eq!(out, format!("before\n{SECRET_MARK}\nafter"));
         let ssh = format!("-----BEGIN OPENSSH {kind}-----\n{body}\n-----END OPENSSH {kind}-----");
         gone(&ssh, &body);
+    }
+
+    #[test]
+    fn private_key_block_without_end_line() {
+        let body = rep('K', 64);
+        let kind = ["PRIVATE", "KEY"].join(" ");
+        let cut = format!("see this:\n-----BEGIN {kind}-----\n{body}\n{body}");
+        let out = scrub_secrets(&cut);
+        assert!(!out.contains(&body), "{out}");
+        assert_eq!(out, format!("see this:\n{SECRET_MARK}"));
+    }
+
+    #[test]
+    fn more_provider_tokens() {
+        let toks = [
+            format!("gsk_{}", rep('g', 52)),
+            format!("xai-{}", rep('x', 80)),
+            format!("pplx-{}", rep('p', 48)),
+            format!("shpat_{}", rep('a', 32)),
+            format!("shpss_{}", rep('b', 32)),
+            format!("dop_v1_{}", rep('c', 64)),
+            format!("ntn_{}", rep('n', 46)),
+            format!("sbp_{}", rep('d', 40)),
+            format!("lin_api_{}", rep('L', 40)),
+            format!("{}:AA{}", "1234567890", rep('T', 33)),
+        ];
+        for t in &toks {
+            gone(&format!("use {t} now"), t);
+        }
+        // A real Django REST token: 40 hex characters.
+        let v = "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b".to_string();
+        let out = scrub_secrets(&format!("curl -H \"Authorization: Token {v}\" https://api.example.com"));
+        assert!(!out.contains(&v), "{out}");
+        assert!(out.contains("Authorization: Token [secret removed]"), "{out}");
+        // Ordinary text with these words stays.
+        for keep in ["The xai- prefix is used by xAI.", "Use a token based login.", "Meeting at 10:30 today", "Authorization: Token based", "Authorization: Token authentication"] {
+            assert_eq!(scrub_secrets(keep), keep);
+        }
+    }
+
+    #[test]
+    fn quoted_password_phrases_are_removed() {
+        for t in [
+            r#"password = "correct horse battery""#,
+            r#"{"password": "correct horse battery"}"#,
+            r#"client_secret: 'correct horse battery'"#,
+            r#"{"accessToken": "correct horse battery"}"#,
+        ] {
+            gone(t, "correct horse");
+        }
+        // Placeholders and references stay.
+        for keep in [r#"password = "<your password>""#, r#""token": "$TOKEN""#, r#""password": """#, "password: see 1Password"] {
+            assert_eq!(scrub_secrets(keep), keep);
+        }
     }
 
     #[test]

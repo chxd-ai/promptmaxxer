@@ -35,8 +35,12 @@ or must be asked first); what the project is; stack and tools; key commands (bui
 - Plain short lines starting with \"- \", grouped under these headings when they have content: Live and risky, Project, Stack, Commands, Rules.
 - Max 300 words. Output only the brief.";
 
-/// Where briefs are cached: `~/.local/share/promptmaxxer/briefs/`.
+/// Where briefs are cached: `~/.local/share/promptmaxxer/briefs/` (Windows: `%APPDATA%\promptmaxxer\briefs`).
 pub fn default_cache_dir() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(appdata) = std::env::var_os("APPDATA").filter(|a| !a.is_empty()) {
+        return PathBuf::from(appdata).join("promptmaxxer").join("briefs");
+    }
     home_dir().join(".local/share/promptmaxxer/briefs")
 }
 
@@ -144,6 +148,7 @@ fn read_cache(file: &Path) -> Option<CacheFile> {
     serde_json::from_slice(&raw).ok()
 }
 
+#[cfg(unix)]
 fn write_cache(file: &Path, cache: &CacheFile) -> std::io::Result<()> {
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
     let dir = file.parent().unwrap_or(Path::new("."));
@@ -155,6 +160,20 @@ fn write_cache(file: &Path, cache: &CacheFile) -> std::io::Result<()> {
         f.sync_all()?;
     }
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    std::fs::rename(&tmp, file)
+}
+
+/// Windows: the cache sits under `%APPDATA%`, which only the user (and administrators) can read.
+#[cfg(not(unix))]
+fn write_cache(file: &Path, cache: &CacheFile) -> std::io::Result<()> {
+    let dir = file.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!(".{}.tmp{}", file.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
+    {
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&tmp)?;
+        f.write_all(&serde_json::to_vec_pretty(cache).map_err(std::io::Error::other)?)?;
+        f.sync_all()?;
+    }
     std::fs::rename(&tmp, file)
 }
 
@@ -307,10 +326,13 @@ mod tests {
         assert_eq!(b.fingerprint, a.fingerprint);
 
         // Cache file is mode 600 and its folder 700.
-        use std::os::unix::fs::PermissionsExt;
         let file = cache_path(&cache, Some(&p), &sources(Some(&p), &project_prefs()));
-        assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(fs::metadata(&cache).unwrap().permissions().mode() & 0o777, 0o700);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(fs::metadata(&cache).unwrap().permissions().mode() & 0o777, 0o700);
+        }
         assert!(file.file_name().unwrap().to_string_lossy().len() == 64 + 5);
 
         // Change a file: miss.

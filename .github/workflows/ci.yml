@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            app/crates/pmx-engines
+            app/crates/pmx-context
+            app/src-tauri
+      - name: pmx-engines
+        working-directory: app/crates/pmx-engines
+        run: cargo test --locked
+      - name: pmx-context
+        working-directory: app/crates/pmx-context
+        run: cargo test --locked
+      - name: app (src-tauri)
+        working-directory: app/src-tauri
+        run: cargo test --locked
+
+  windows-installer:
+    name: Windows installer and smoke test
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --version "^2.12" --locked
+      # Unsigned NSIS installer (tauri.windows.conf.json). Tauri downloads NSIS itself.
+      - name: Build the installer
+        working-directory: app/src-tauri
+        run: cargo tauri build --bundles nsis
+      # The built exe, headless: a mock OpenAI-compatible server stands in for the AI.
+      - name: Smoke test (headless rewrite)
+        run: python tests/smoke_headless.py app/src-tauri/target/release/promptmaxxer.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: promptmaxxer-windows-installer
+          path: app/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

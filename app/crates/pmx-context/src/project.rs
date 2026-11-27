@@ -22,6 +22,11 @@ pub fn detect_project_with_source(app: &AppInfo, window_title: Option<&str>, pin
     if let Some(p) = pinned {
         return (project_from_dir(p), "pinned");
     }
+    // Windows: another process's working folder cannot be read without reading its memory, and there is no
+    // window document. No project unless one is pinned in settings.
+    if cfg!(windows) {
+        return (None, "none");
+    }
     let class = app_class(app);
     if matches!(class, AppClass::Browser | AppClass::Other) {
         return (None, "none");
@@ -282,6 +287,7 @@ mod tests {
         assert_eq!(names.iter().filter(|n| *n == "/Users/x/shop").count(), 1);
     }
 
+    #[cfg(unix)]
     #[test]
     fn editor_titles() {
         let tmp = tempfile::tempdir().unwrap();

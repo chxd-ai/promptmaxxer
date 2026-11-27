@@ -7,7 +7,7 @@ use std::path::Path;
 use tokio::process::Command;
 
 pub(crate) fn command(cli: &Path, model: &str, framework_file: &Path) -> Command {
-    let mut c = Command::new(cli);
+    let mut c = crate::paths::cli_command(cli);
     c.args(["-p", "--model", model])
         // No user, project or local settings: no hooks, plugins, permissions or output styles.
         .args(["--setting-sources", ""])
@@ -27,7 +27,14 @@ pub(crate) fn command(cli: &Path, model: &str, framework_file: &Path) -> Command
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE_ENTRYPOINT")
         .env_remove("CLAUDE_CODE_SSE_PORT");
+    no_api_key(c.as_std_mut());
     c
+}
+
+/// Claude Code uses `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` before the plan sign-in, which would bill
+/// the API instead of the person's Claude plan. The plan engine never passes them on.
+pub(crate) fn no_api_key(c: &mut std::process::Command) {
+    c.env_remove("ANTHROPIC_API_KEY").env_remove("ANTHROPIC_AUTH_TOKEN");
 }
 
 /// `claude auth status --json`: no model call, about 0.2 s.
@@ -110,6 +117,17 @@ mod tests {
         p.feed(r#"{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}"#);
         let e = p.finish(false, "").unwrap_err();
         assert!(e.to_string().contains("Not logged in"), "{e}");
+    }
+
+    #[test]
+    fn api_key_env_is_removed() {
+        let c = command(Path::new("/x/claude"), "haiku", Path::new("/tmp/f.md"));
+        for k in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] {
+            assert!(c.as_std().get_envs().any(|(n, v)| n == k && v.is_none()), "{k} not removed");
+        }
+        let mut s = std::process::Command::new("/x/claude");
+        no_api_key(&mut s);
+        assert_eq!(s.get_envs().filter(|(_, v)| v.is_none()).count(), 2);
     }
 
     #[test]

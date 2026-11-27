@@ -34,8 +34,9 @@ text is replaced with a strong prompt written for the AI it is going to and the 
   in and reads the same instruction files those tools read (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`,
   `.claude/CLAUDE.md`, and Claude Code's project memory). It turns them into a short project brief, so the rewrite
   uses your real commands, paths and rules.
-- **Use the AI plan you already pay for.** A Claude plan through the Claude Code CLI, a ChatGPT plan through the
-  Codex CLI, or your own Anthropic API key.
+- **Any model.** Use the AI plan you already pay for (a Claude plan through the Claude Code CLI, a ChatGPT plan
+  through the Codex CLI), your own Anthropic API key, or any OpenAI-compatible API: OpenAI, OpenRouter, Groq,
+  DeepSeek, Mistral, Gemini, or a local model through Ollama or LM Studio. Every model name can be changed.
 - **Floating bar.** Shows the target, the context it used, and the prompt streaming in. Esc cancels.
 - **Fail-safe.** Any error, timeout or refusal leaves your text unchanged and your clipboard restored.
 - **Undo.** The paste is one edit: Cmd+Z in the app brings the original back.
@@ -74,19 +75,45 @@ text is replaced with a strong prompt written for the AI it is going to and the 
 | Claude plan | [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and signed in (`claude`) | `haiku` | `sonnet` |
 | ChatGPT plan | [Codex CLI](https://github.com/openai/codex) installed and signed in (`codex`) | `gpt-6.2-sol` | `gpt-6.2-astra` |
 | Google account (experimental) | Gemini CLI installed and signed in (`gemini`) | `flash` | `pro` |
+| Any model (OpenAI-compatible API) | An API address and a model name; a key only if the service needs one (stored in the macOS Keychain) | your pick | your pick (empty: same as fast) |
 
-On Auto, the first ready engine in that order is used. You can pin an engine per key in Settings; a pinned engine
+The models in the table are the built-in ones. Settings > Engine > Model names replaces any of them with another
+model name the engine accepts (for example `opus` for the Claude plan max key).
+
+On Auto, the first ready engine in that order is used. "Any model" comes last: it counts as ready as soon as an
+address and a model name are filled in, so Auto uses it only when no other engine is ready. Pin it to use it first.
+You can pin an engine per key in Settings; a pinned engine
 that is not ready is never swapped for another one, so no other account is billed silently.
 
 The CLI engines run in a scratch folder in your per-user temp folder, with your own `CLAUDE.md`/`AGENTS.md` and
 memory turned off for the call. Claude Code runs with no tools; Codex runs read-only with its shell, web search and
 other tools turned off. For Codex a scratch `CODEX_HOME` holds only a link to your sign-in file, so your global Codex
-instructions and config are not loaded. Model names live in `app/crates/pmx-engines/src/lib.rs` (`EngineId::model`).
+instructions and config are not loaded. Built-in model names live in `app/crates/pmx-engines/src/lib.rs`
+(`EngineId::default_model`).
+
+### Any model (OpenAI-compatible API)
+
+Settings > Engine > Any model takes an API address, a fast model and an optional max model. `/chat/completions` is
+added to the address. The list next to the address field has these:
+
+| Service | API address | Key |
+|---|---|---|
+| Ollama on this Mac | `http://localhost:11434/v1` | none |
+| LM Studio on this Mac | `http://localhost:1234/v1` | none |
+| OpenRouter (hundreds of models) | `https://openrouter.ai/api/v1` | yes |
+| OpenAI | `https://api.openai.com/v1` | yes |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | yes |
+| Groq, DeepSeek, Mistral, xAI, Together | see the list in Settings | yes |
+
+Local models: the rulebook is about 6,000 tokens. Ollama's default context window can be smaller, and then it cuts
+the start of the rulebook. Start Ollama with a bigger window, for example `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`.
+A model that is not loaded yet can take most of the 60-second limit on its first call. `<think>` blocks from
+reasoning models are removed from the result.
 
 ## Requirements
 
-- macOS 12 or later.
-- Accessibility permission (System Settings > Privacy & Security > Accessibility), so the app can copy and paste
+- macOS 12 or later, or Windows 10/11 (see [Windows](#windows)).
+- macOS: Accessibility permission (System Settings > Privacy & Security > Accessibility), so the app can copy and paste
   for you. The first-run screens walk you through it.
 - At least one engine from the table above.
 
@@ -132,8 +159,33 @@ echo "fix the login bug on mobile" | \
   /Applications/promptmaxxer.app/Contents/MacOS/promptmaxxer --rewrite --level standard --app Ghostty
 ```
 
-Flags: `--level standard|max`, `--app NAME`, `--engine anthropic-key|claude-plan|chatgpt-plan|gemini-plan`,
+Flags: `--level standard|max`, `--app NAME`, `--engine custom-api|anthropic-key|claude-plan|chatgpt-plan|gemini-plan`,
 `--project DIR`, `--target HINT`, `--no-brief`. On failure it prints the draft unchanged and exits with code 1.
+
+### Windows
+
+Windows 10 and 11 are supported. CI (`.github/workflows/ci.yml`) builds an unsigned NSIS installer
+(`promptmaxxer_<version>_x64-setup.exe`, per-user, no admin rights) on every push and keeps it as a build
+artifact. To build it yourself on Windows, install Rust and the Tauri CLI as above, then in `app\src-tauri`:
+`cargo tauri build --bundles nsis`. Windows shows a SmartScreen warning for an unsigned installer.
+
+How it differs from macOS:
+
+- Keys: `Ctrl+Alt+Space` (fast) and `Ctrl+Shift+Space` (max). `Alt+Space` is the Windows window menu.
+- No Accessibility permission: the first-run screens skip that step.
+- The menu bar icon is a system tray icon.
+- API keys are stored in Windows Credential Manager (generic credentials `promptmaxxer:anthropic` and
+  `promptmaxxer:custom-api:<host>`).
+- Files: settings, history, briefs and the log are in `%APPDATA%\promptmaxxer`.
+- Project context: Windows offers no clean way to read a terminal's working folder, so there is no automatic
+  project brief. Pin a project in Settings to use one.
+- The floating bar opens near the mouse, not under the selection.
+- Terminals (Windows Terminal, PowerShell, Command Prompt, Git Bash) get the result on the clipboard. The copy in
+  terminals and VS Code style editors uses `Ctrl+Insert`, which never interrupts a running program the way
+  `Ctrl+C` does there.
+- Apps running as administrator do not accept keys from a normal app (Windows UIPI): a press there copies nothing.
+- CLI engines installed with npm (`claude.cmd`, `codex.cmd`, `gemini.cmd` in `%APPDATA%\npm`) are started through
+  `node`, not `cmd.exe`.
 
 `bin/promptmaxx` is the original Python prototype of the rewrite step (Claude Code CLI only). The eval harness uses
 it as its reference runner.
@@ -159,16 +211,22 @@ Reports go to `evals/results/` (not tracked).
 ## Privacy
 
 - No account, no server, no analytics, no tracking. The only network call is to the engine you picked
-  (Anthropic directly, or the Claude Code, Codex or Gemini CLI on your Mac).
+  (the API address you set, Anthropic directly, or the Claude Code, Codex or Gemini CLI on your Mac). With a local
+  model (Ollama, LM Studio) nothing leaves your Mac.
 - What is sent: the highlighted text, the app name and target, the cached project brief, and the rulebook.
   The highlighted text is sent as it is: do not highlight secrets. The project instruction files are scrubbed of
   keys and passwords before they are summarised, and the brief is scrubbed again.
-- Your Anthropic API key is stored in the macOS login Keychain (service `promptmaxxer`), never in a file or a log.
+- API keys are stored in the macOS login Keychain (service `promptmaxxer`, accounts `anthropic` and
+  `custom-api:<host>`, one per API address host; that key is sent only to that host, and never over plain `http://`
+  except to this computer;
+  on Windows: Credential Manager),
+  never in a file or a log.
 - Files on your Mac:
   - settings: `~/.local/share/promptmaxxer/settings.json`
   - history (drafts and results): `~/.local/share/promptmaxxer/history.jsonl`, file mode 600; turn it off in Settings
   - project briefs: `~/.local/share/promptmaxxer/briefs/`
   - log (no keys, no selected text): `~/Library/Logs/promptmaxxer.log`
+  - Windows: all of these in `%APPDATA%\promptmaxxer` (log: `promptmaxxer.log`)
 - The app never presses Enter or sends anything: it only replaces the text you highlighted.
 
 ## Repository layout
@@ -176,7 +234,7 @@ Reports go to `evals/results/` (not tracked).
 | Path | What |
 |---|---|
 | `app/src-tauri/` | The menu bar app (Tauri 2, Rust): keys, copy and paste, floating bar, settings, history |
-| `app/crates/pmx-engines/` | Engines: Anthropic API, Claude Code CLI, Codex CLI, Gemini CLI; the output guard |
+| `app/crates/pmx-engines/` | Engines: any OpenAI-compatible API, Anthropic API, Claude Code CLI, Codex CLI, Gemini CLI; model choice; the output guard |
 | `app/crates/pmx-context/` | Front app, target AI, project detection, instruction files, project brief, secret scrubbing |
 | `app/ui/` | HTML, CSS and JS for the bar, settings, onboarding and history windows |
 | `framework/system-prompt.md` | The rewrite rulebook |

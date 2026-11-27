@@ -1,6 +1,7 @@
 //! The floating bar: a transparent, always-on-top 560 x 220 window (`ui/bar.html`) that never takes the focus
-//! from the app being edited. It is shown with `orderFrontRegardless` (no activation), placed under the selection
-//! (Accessibility bounds) or near the mouse, kept on screen, and fed `pmx:bar` events.
+//! from the app being edited. It is shown with `orderFrontRegardless` (no activation; Windows: `SW_SHOWNOACTIVATE`
+//! and topmost), placed under the selection (Accessibility bounds) or near the mouse, kept on screen, and fed
+//! `pmx:bar` events.
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, LogicalPosition, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -102,6 +103,21 @@ pub fn show(app: &AppHandle, anchor: Anchor) {
     let (x, y) = place(anchor, &screens(app));
     let _ = w.set_position(LogicalPosition::new(x, y));
     let w2 = w.clone();
+    #[cfg(windows)]
+    let _ = app.run_on_main_thread(move || {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNOACTIVATE,
+        };
+        if let Ok(h) = w2.hwnd() {
+            let hwnd = h.0 as windows_sys::Win32::Foundation::HWND;
+            // SAFETY: a live window owned by tao, used on the main thread.
+            unsafe {
+                ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+        }
+    });
+    #[cfg(target_os = "macos")]
     let _ = app.run_on_main_thread(move || {
         if let Ok(ptr) = w2.ns_window() {
             // SAFETY: a live NSWindow owned by tao, used on the main thread.

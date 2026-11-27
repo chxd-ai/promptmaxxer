@@ -1,7 +1,7 @@
 //! pmx-engines: turn a rough prompt into a strong one with whichever AI the person already has.
 //!
-//! Engines, in default pick order: `anthropic-key` (API key in the keychain), `claude-plan` (Claude Code
-//! CLI), `chatgpt-plan` (Codex CLI), `gemini-plan` (Gemini CLI). [`detect_all`] says which are ready,
+//! Engines, in default pick order: `anthropic-key` (API key in the keychain), `claude-plan` (Claude Code CLI),
+//! `chatgpt-plan` (Codex CLI), `gemini-plan` (Gemini CLI), `custom-api` (any OpenAI-compatible API, cloud or local). The model each engine uses can be changed: see [`models`]. [`detect_all`] says which are ready,
 //! [`pick`] chooses one, [`run`] streams the rewrite as [`Event`]s and returns the [`Outcome`].
 //!
 //! Event order for one [`run`]: `Started`, `Delta`*, then `Done` or `Failed`. If the first reply is a
@@ -10,6 +10,7 @@
 
 pub mod guard;
 pub mod keychain;
+pub mod models;
 mod paths;
 mod proc;
 mod prompt;
@@ -18,11 +19,13 @@ mod engines {
     pub(crate) mod claude;
     pub(crate) mod codex;
     pub(crate) mod gemini;
+    pub(crate) mod openai;
 }
 
+pub use models::{configure, CustomApi, LevelModels, ModelConfig};
 pub use prompt::user_message;
 
-use engines::{anthropic, claude, codex, gemini};
+use engines::{anthropic, claude, codex, gemini, openai};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::{Command as StdCommand, Stdio};
@@ -40,6 +43,8 @@ pub enum Level {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EngineId {
+    #[serde(rename = "custom-api")]
+    CustomApi,
     #[serde(rename = "anthropic-key")]
     AnthropicKey,
     #[serde(rename = "claude-plan")]
@@ -51,11 +56,13 @@ pub enum EngineId {
 }
 
 impl EngineId {
-    /// Default pick order.
-    pub const ALL: [EngineId; 4] = [EngineId::AnthropicKey, EngineId::ClaudePlan, EngineId::ChatGptPlan, EngineId::GeminiPlan];
+    /// Default pick order for Auto. `custom-api` is last: an address and a model name are enough to make it
+    /// "ready", so it must not take over every press from an engine the person signed in to.
+    pub const ALL: [EngineId; 5] = [EngineId::AnthropicKey, EngineId::ClaudePlan, EngineId::ChatGptPlan, EngineId::GeminiPlan, EngineId::CustomApi];
 
     pub fn as_str(self) -> &'static str {
         match self {
+            EngineId::CustomApi => "custom-api",
             EngineId::AnthropicKey => "anthropic-key",
             EngineId::ClaudePlan => "claude-plan",
             EngineId::ChatGptPlan => "chatgpt-plan",
@@ -65,6 +72,7 @@ impl EngineId {
 
     pub fn label(self) -> &'static str {
         match self {
+            EngineId::CustomApi => "Any model (OpenAI-compatible API)",
             EngineId::AnthropicKey => "Anthropic API key",
             EngineId::ClaudePlan => "Claude plan",
             EngineId::ChatGptPlan => "ChatGPT plan",
@@ -72,9 +80,32 @@ impl EngineId {
         }
     }
 
-    /// Model name per level. CLI engines take their CLI's alias or model id.
-    pub fn model(self, level: Level) -> &'static str {
+    /// The model this engine uses for this level: the person's choice (settings), else the default.
+    pub fn model(self, level: Level) -> String {
+        self.model_in(level, &models::current())
+    }
+
+    pub fn model_in(self, level: Level, cfg: &ModelConfig) -> String {
+        let pick = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
+        if self == EngineId::CustomApi {
+            let fast = cfg.custom.fast_model.trim().to_string();
+            return match level {
+                Level::Standard => fast,
+                Level::Max => pick(&cfg.custom.max_model).unwrap_or(fast),
+            };
+        }
+        let chosen = cfg.models.get(self.as_str()).and_then(|m| match level {
+            Level::Standard => pick(&m.fast),
+            Level::Max => pick(&m.max),
+        });
+        chosen.unwrap_or_else(|| self.default_model(level).to_string())
+    }
+
+    /// The built-in model name per level. CLI engines take their CLI's alias or model id.
+    /// `custom-api` has no default: the person names the model.
+    pub fn default_model(self, level: Level) -> &'static str {
         match (self, level) {
+            (EngineId::CustomApi, _) => "",
             (EngineId::AnthropicKey, Level::Standard) => "claude-haiku-5-5",
             (EngineId::AnthropicKey, Level::Max) => "claude-sonnet-5-5",
             (EngineId::ClaudePlan, Level::Standard) => "haiku",
@@ -111,6 +142,11 @@ pub struct EngineStatus {
     pub ready: bool,
     /// "Signed in", "CLI not found", "Not signed in"
     pub detail: String,
+    /// The models in use now, and the built-in ones (empty for `custom-api`).
+    pub fast_model: String,
+    pub max_model: String,
+    pub default_fast: String,
+    pub default_max: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,7 +237,49 @@ fn quick_output(mut cmd: StdCommand) -> Option<(bool, String)> {
 }
 
 fn status(id: EngineId, ready: bool, detail: impl Into<String>) -> EngineStatus {
-    EngineStatus { id, label: id.label().to_string(), ready, detail: detail.into() }
+    EngineStatus {
+        id,
+        label: id.label().to_string(),
+        ready,
+        detail: detail.into(),
+        fast_model: id.model(Level::Standard),
+        max_model: id.model(Level::Max),
+        default_fast: id.default_model(Level::Standard).into(),
+        default_max: id.default_model(Level::Max).into(),
+    }
+}
+
+/// Provider name of the `custom-api` key. The keychain account is per host: [`CustomApi::key_account`].
+/// A key saved under the bare `custom-api` account (older builds) is not read: it cannot be tied to a host.
+pub const CUSTOM_KEY: &str = "custom-api";
+
+/// The key for this `custom-api` setup: the given one, else the one saved for its host. Err when a key
+/// would go over plain http to another computer.
+fn custom_key(cfg: &CustomApi, given: Option<String>) -> Result<Option<String>, EngineError> {
+    let key = given.or_else(|| keychain::get(&cfg.key_account()));
+    if key.is_some() && !cfg.key_allowed() {
+        return Err(EngineError::NotReady(
+            "Any model: a key is only sent over https:// (or to this computer). Change the API address to https://".into(),
+        ));
+    }
+    Ok(key)
+}
+
+fn custom_status(c: &CustomApi, key_saved: bool) -> EngineStatus {
+    let id = EngineId::CustomApi;
+    if !c.is_set() {
+        return status(id, false, "Not set up");
+    }
+    if key_saved && !c.key_allowed() {
+        return status(id, false, format!("{}: key saved, but the address is not https", c.host()));
+    }
+    status(id, true, format!("{}{}", c.host(), if key_saved { ", key saved" } else { "" }))
+}
+
+fn detect_custom() -> EngineStatus {
+    let c = models::current().custom;
+    let saved = c.is_set() && keychain::get(&c.key_account()).is_some();
+    custom_status(&c, saved)
 }
 
 fn detect_anthropic() -> EngineStatus {
@@ -214,8 +292,9 @@ fn detect_anthropic() -> EngineStatus {
 fn detect_claude() -> EngineStatus {
     let id = EngineId::ClaudePlan;
     let Some(cli) = paths::find_cli("claude") else { return status(id, false, "CLI not found") };
-    let mut c = StdCommand::new(&cli);
-    c.args(["auth", "status", "--json"]).current_dir("/tmp").env("PATH", paths::child_path(&cli));
+    let mut c = paths::std_command(&cli);
+    c.args(["auth", "status", "--json"]).current_dir(paths::status_dir()).env("PATH", paths::child_path(&cli));
+    claude::no_api_key(&mut c);
     match quick_output(c).and_then(|(_, out)| claude::parse_auth_status(&out)) {
         Some(true) => status(id, true, "Signed in"),
         Some(false) => status(id, false, "Not signed in"),
@@ -227,8 +306,8 @@ fn detect_codex() -> EngineStatus {
     let id = EngineId::ChatGptPlan;
     let Some(launcher) = paths::find_cli("codex") else { return status(id, false, "CLI not found") };
     let Some(cli) = paths::codex_native(&launcher) else { return status(id, false, "CLI found, but its program file is missing") };
-    let mut c = StdCommand::new(&cli);
-    c.args(["login", "status"]).current_dir("/tmp").env("PATH", paths::child_path(&cli));
+    let mut c = paths::std_command(&cli);
+    c.args(["login", "status"]).current_dir(paths::status_dir()).env("PATH", paths::child_path(&cli));
     match quick_output(c) {
         Some((_, out)) => {
             let (ready, detail) = codex::parse_login_status(&out);
@@ -250,11 +329,13 @@ fn detect_gemini() -> EngineStatus {
 /// Which engines are ready. No model calls; the checks run in parallel (about 0.2 s here).
 pub fn detect_all() -> Vec<EngineStatus> {
     std::thread::scope(|s| {
+        // Same order as `EngineId::ALL`.
         let hs = [
             s.spawn(detect_anthropic),
             s.spawn(detect_claude),
             s.spawn(detect_codex),
             s.spawn(detect_gemini),
+            s.spawn(detect_custom),
         ];
         hs.into_iter()
             .zip(EngineId::ALL)
@@ -285,6 +366,9 @@ pub struct RunOptions {
     pub anthropic_key: Option<String>,
     /// Use this program instead of the CLI found on disk.
     pub cli: Option<PathBuf>,
+    /// `custom-api`: use this setup and key instead of the saved ones.
+    pub custom: Option<CustomApi>,
+    pub custom_key: Option<String>,
     pub timeout: Option<Duration>,
 }
 
@@ -307,7 +391,10 @@ pub async fn run_with(
     opts: RunOptions,
 ) -> Result<Outcome, EngineError> {
     let t0 = Instant::now();
-    let model = engine.model(req.level).to_string();
+    let model = match (&opts.custom, engine) {
+        (Some(c), EngineId::CustomApi) => EngineId::CustomApi.model_in(req.level, &ModelConfig { custom: c.clone(), ..Default::default() }),
+        _ => engine.model(req.level),
+    };
     let res = run_inner(engine, &req, &model, &tx, &cancel, &opts, t0).await;
     match &res {
         Ok(o) => {
@@ -387,6 +474,14 @@ async fn call_raw(
     }
     let fw_file = || paths::framework_file(system).map_err(|e| EngineError::Cli(format!("could not write the framework file: {e}")));
     match engine {
+        EngineId::CustomApi => {
+            let cfg = opts.custom.clone().unwrap_or_else(|| models::current().custom);
+            if !cfg.is_set() {
+                return Err(EngineError::NotReady("Any model: set the API address and model name in Settings".into()));
+            }
+            let key = custom_key(&cfg, opts.custom_key.clone())?;
+            openai::call(&cfg.endpoint(), key.as_deref(), model, system, &user, tx, cancel, timeout).await
+        }
         EngineId::AnthropicKey => {
             let key = opts
                 .anthropic_key
@@ -415,8 +510,8 @@ async fn call_raw(
             let cli = opts.cli.clone().or_else(|| paths::find_cli("gemini")).ok_or_else(|| not_found("Gemini"))?;
             let home = gemini::scratch_home();
             gemini::prepare_home(&gemini::real_dir(), &home).map_err(|e| EngineError::Cli(format!("could not set up the Gemini folder: {e}")))?;
-            let cmd = gemini::command(&cli, model, &fw_file()?, &home, &user);
-            proc::run_cli(cmd, None, &mut gemini::Parser::default(), tx, cancel, timeout).await
+            let cmd = gemini::command(&cli, model, &fw_file()?, &home);
+            proc::run_cli(cmd, Some(user), &mut gemini::Parser::default(), tx, cancel, timeout).await
         }
     }
 }
@@ -439,7 +534,7 @@ pub async fn complete_with(
 ) -> Result<String, EngineError> {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let model = engine.model(level);
-    let out = call_raw(engine, level, model, system, user, &tx, &cancel, &opts).await?;
+    let out = call_raw(engine, level, &model, system, user, &tx, &cancel, &opts).await?;
     let out = out.trim().to_string();
     if out.is_empty() {
         return Err(EngineError::BadOutput("The AI returned nothing".into()));
@@ -483,7 +578,7 @@ mod tests {
 
     #[test]
     fn pick_auto_and_pinned() {
-        let s = [st(EngineId::AnthropicKey, false), st(EngineId::ClaudePlan, true), st(EngineId::ChatGptPlan, true), st(EngineId::GeminiPlan, false)];
+        let s = [st(EngineId::CustomApi, true), st(EngineId::AnthropicKey, false), st(EngineId::ClaudePlan, true), st(EngineId::ChatGptPlan, true), st(EngineId::GeminiPlan, false)];
         assert_eq!(pick(None, &s), Some(EngineId::ClaudePlan));
         assert_eq!(pick(Some(EngineId::ChatGptPlan), &s), Some(EngineId::ChatGptPlan));
         assert_eq!(pick(Some(EngineId::GeminiPlan), &s), None);
@@ -492,12 +587,55 @@ mod tests {
         // Order comes from the default order, not the slice order.
         let rev = [st(EngineId::GeminiPlan, true), st(EngineId::AnthropicKey, true)];
         assert_eq!(pick(None, &rev), Some(EngineId::AnthropicKey));
+        // A set-up custom API is used on Auto only when nothing else is ready.
+        assert_eq!(pick(None, &[st(EngineId::CustomApi, true), st(EngineId::GeminiPlan, true)]), Some(EngineId::GeminiPlan));
+        assert_eq!(pick(None, &[st(EngineId::CustomApi, true)]), Some(EngineId::CustomApi));
+        assert_eq!(EngineId::ALL.last(), Some(&EngineId::CustomApi));
+    }
+
+    #[test]
+    fn custom_key_never_goes_over_plain_http_to_another_host() {
+        let c = |u: &str| CustomApi { base_url: u.into(), fast_model: "m".into(), max_model: String::new() };
+        assert!(custom_key(&c("http://api.example.com/v1"), Some("k".into())).is_err());
+        assert_eq!(custom_key(&c("https://api.example.com/v1"), Some("k".into())).unwrap().as_deref(), Some("k"));
+        assert_eq!(custom_key(&c("http://localhost:11434/v1"), Some("k".into())).unwrap().as_deref(), Some("k"));
+        assert!(custom_status(&c("http://api.example.com/v1"), true).detail.contains("not https"));
+        assert!(!custom_status(&c("http://api.example.com/v1"), true).ready);
+        let ok = custom_status(&c("https://openrouter.ai/api/v1"), true);
+        assert!(ok.ready && ok.detail == "openrouter.ai, key saved", "{ok:?}");
+        assert_eq!(custom_status(&c("http://localhost:11434/v1"), false).detail, "localhost:11434");
+        assert_eq!(custom_status(&CustomApi::default(), false).detail, "Not set up");
+    }
+
+    #[test]
+    fn models_default_and_override() {
+        let mut cfg = ModelConfig::default();
+        assert_eq!(EngineId::ClaudePlan.model_in(Level::Standard, &cfg), "haiku");
+        assert_eq!(EngineId::CustomApi.model_in(Level::Max, &cfg), "");
+        cfg.models.insert("claude-plan".into(), LevelModels { fast: " ".into(), max: "opus".into() });
+        assert_eq!(EngineId::ClaudePlan.model_in(Level::Standard, &cfg), "haiku");
+        assert_eq!(EngineId::ClaudePlan.model_in(Level::Max, &cfg), "opus");
+        cfg.custom = CustomApi { base_url: "http://localhost:11434/v1".into(), fast_model: "qwen3:8b".into(), max_model: String::new() };
+        assert_eq!(EngineId::CustomApi.model_in(Level::Standard, &cfg), "qwen3:8b");
+        assert_eq!(EngineId::CustomApi.model_in(Level::Max, &cfg), "qwen3:8b");
+        cfg.custom.max_model = "qwen3:32b".into();
+        assert_eq!(EngineId::CustomApi.model_in(Level::Max, &cfg), "qwen3:32b");
     }
 
     #[test]
     fn quick_output_times_out() {
-        let mut c = StdCommand::new("/bin/sleep");
-        c.arg("5");
+        #[cfg(unix)]
+        let c = {
+            let mut c = StdCommand::new("/bin/sleep");
+            c.arg("5");
+            c
+        };
+        #[cfg(windows)]
+        let c = {
+            let mut c = StdCommand::new("powershell.exe");
+            c.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 5"]);
+            c
+        };
         let t = Instant::now();
         assert!(quick_output(c).is_none());
         assert!(t.elapsed() < Duration::from_secs(2));

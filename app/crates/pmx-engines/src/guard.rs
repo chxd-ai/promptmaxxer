@@ -12,10 +12,11 @@ static PREAMBLE: LazyLock<Regex> = LazyLock::new(|| {
 static IDEAL_TAG: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\A</?ideal_output>\s*|\s*</?ideal_output>\z").unwrap());
 
-/// Openers that are always a comment, never a prompt.
+/// Openers that are always a comment, never a prompt. "The user …" and "The draft …" only in their meta
+/// forms ("The user wants …", "The draft is …"): "The user clicks Save and nothing happens" is a real prompt.
 static ALWAYS_BAD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)\A\s*(I'?m Prompt[ -]?maxxer|As Prompt[ -]?maxxer|The user|The draft|This draft|Here(?:'s| is) (?:the|your|a|an) (?:rewritten|improved|enhanced|better|stronger)|I'?ll rewrite|I need the draft)",
+        r"(?i)\A\s*(I'?m Prompt[ -]?maxxer|As Prompt[ -]?maxxer|The (?:user|person) (?:wants|is asking|has asked|asked|would like|is requesting|needs you)|(?:The|This) draft (?:is|asks|seems|wants|appears|looks|reads)|Here(?:'s| is) (?:the|your|a|an) (?:rewritten|improved|enhanced|better|stronger)|I'?ll rewrite|I need the draft)",
     )
     .unwrap()
 });
@@ -27,9 +28,10 @@ static REFUSAL_START: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
-/// Phrases that only appear when the model talks about itself or the tool.
+/// Phrases that only appear when the model talks about itself or the tool. "your draft" only next to
+/// rewrite words: "Proofread your draft of the essay" is a real prompt.
 static ROLE_TALK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)Prompt[ -]?maxxer|\bmy role\b|prompt rewrite|\byour draft\b|the draft you|run (?:it|this) again").unwrap()
+    Regex::new(r"(?i)Prompt[ -]?maxxer|\bmy role\b|prompt rewrite|\byour draft\b[^.\n]{0,40}(?:rewr(?:it|ot)|prompt)|(?:rewr(?:it|ot)|prompt)[^.\n]{0,40}\byour draft\b|the draft you|run (?:it|this) again").unwrap()
 });
 static JOB_TALK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)draft|rewrit|Prompt[ -]?maxxer|environment block|email block|system block|paste (?:just|the|your)").unwrap()
@@ -76,8 +78,9 @@ pub fn looks_bad(out: &str, draft: &str) -> bool {
     if new_match(&ALWAYS_BAD, out, &d) || (out.contains("<draft>") && !draft.contains("<draft>")) {
         return true;
     }
-    // Claude Code tells the model its scratch folder; a rewrite that copies it in is broken.
-    if ["/tmp/promptmaxxer-run", "/private/tmp/claude-"].iter().any(|p| out.contains(p) && !draft.contains(p)) {
+    // Claude Code tells the model its scratch folder; a rewrite that copies it in is broken. The folder is
+    // `$TMPDIR/promptmaxxer-run` on macOS and `%TEMP%\promptmaxxer-run` on Windows, so match the name anywhere.
+    if ["promptmaxxer-run", "/private/tmp/claude-"].iter().any(|p| out.contains(p) && !draft.contains(p)) {
         return true;
     }
     let first = head(out, 400);
@@ -201,6 +204,35 @@ mod tests {
     fn scratch_folder_in_output_is_bad() {
         assert!(looks_bad("Work in /private/tmp/promptmaxxer-run and fix the login page bug.", DRAFT));
         assert!(looks_bad("Fix the login page. Notes go in /private/tmp/claude-501/x/scratchpad.", DRAFT));
+    }
+
+    #[test]
+    fn user_and_draft_openers_flag_only_meta_forms() {
+        let d = "when user clicks save nothing happens";
+        assert!(!looks_bad("The user clicks Save and nothing happens. Find out why the save handler does not fire and fix it.", d));
+        assert!(!looks_bad("The user profile page crashes on load. Find the cause and fix it.", DRAFT));
+        assert!(!looks_bad("The draft folder fills up with empty files. Find what creates them and stop it.", DRAFT));
+        assert!(!looks_bad("Proofread your draft of the board letter and list every typo.", DRAFT));
+        for bad in [
+            "The user wants the login page fixed.",
+            "The user is asking for a login fix.",
+            "The user has asked me to fix the login page.",
+            "The user would like a working login page.",
+            "The draft is a request to fix the login page.",
+            "The draft asks for a login fix, so here it is.",
+            "The draft seems to be about a login page.",
+            "Fix the login page. I rewrote your draft to be clearer.",
+            "Here is a prompt built from your draft: fix the login page.",
+        ] {
+            assert!(looks_bad(bad, DRAFT), "should be bad: {bad:?}");
+        }
+    }
+
+    #[test]
+    fn scratch_folder_name_anywhere() {
+        assert!(looks_bad("Work in /var/folders/ab/T/promptmaxxer-run and fix the login page bug.", DRAFT));
+        assert!(looks_bad("Work in C:\\Users\\me\\AppData\\Local\\Temp\\promptmaxxer-run and fix the login bug.", DRAFT));
+        assert!(!looks_bad("Clean up the promptmaxxer-run folder and fix the login page bug.", "clean the promptmaxxer-run folder"));
     }
 
     #[test]

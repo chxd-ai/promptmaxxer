@@ -32,6 +32,11 @@ section{scroll-margin-top:52px}
 .msg{font-size:12px;color:var(--soft);padding:0 0 12px 36px;margin-top:-4px}
 .msg.ok{color:var(--ink)}
 .indent{padding-left:36px}
+/* models */
+.mrow{display:flex;align-items:center;gap:10px;min-height:44px}
+.mrow .mlab{flex:none;width:146px;font-size:13px;color:var(--soft)}
+.mrow .field{flex:1;min-width:0}
+.sub{font:600 13px/1.3 var(--round);color:var(--ink);padding:14px 0 4px 36px}
 /* keys */
 .combo{display:inline-flex;gap:6px;align-items:center;border:0;background:transparent;padding:6px;margin:-6px;border-radius:14px}
 .combo.rec{box-shadow:var(--press-s);padding:6px 12px;margin:-6px 0}
@@ -74,6 +79,36 @@ select.pick{min-width:170px}
         <button class="b ghost xs" id="delKey">Remove</button>
       </div>
       <div class="msg" id="keyMsg">Kept in the macOS Keychain, never in a file. Get one at <span class="mono">console.anthropic.com</span>.</div>
+
+      <div class="sub">Any model · any OpenAI-compatible API, in the cloud or on this Mac</div>
+      <div class="mrow"><span class="mlab indent">API address</span>
+        <label class="field sm"><input id="cBase" list="cBases" spellcheck="false" autocomplete="off" placeholder="http://localhost:11434/v1" aria-label="API address"></label></div>
+      <datalist id="cBases">
+        <option value="http://localhost:11434/v1">Ollama on this Mac</option>
+        <option value="http://localhost:1234/v1">LM Studio on this Mac</option>
+        <option value="https://openrouter.ai/api/v1">OpenRouter</option>
+        <option value="https://api.openai.com/v1">OpenAI</option>
+        <option value="https://generativelanguage.googleapis.com/v1beta/openai">Google Gemini</option>
+        <option value="https://api.groq.com/openai/v1">Groq</option>
+        <option value="https://api.deepseek.com/v1">DeepSeek</option>
+        <option value="https://api.mistral.ai/v1">Mistral</option>
+        <option value="https://api.x.ai/v1">xAI</option>
+        <option value="https://api.together.xyz/v1">Together</option>
+      </datalist>
+      <div class="mrow"><span class="mlab indent">Fast model</span>
+        <label class="field sm"><input id="cFast" spellcheck="false" autocomplete="off" placeholder="qwen3:8b, gpt-5-mini, anthropic/claude-haiku-5-5" aria-label="Model for the fast key"></label></div>
+      <div class="mrow"><span class="mlab indent">Max model</span>
+        <label class="field sm"><input id="cMax" spellcheck="false" autocomplete="off" placeholder="Empty: same as fast" aria-label="Model for the max key"></label></div>
+      <div class="row keyrow">
+        <span class="indent" style="flex:none;font-size:13px;color:var(--soft);width:146px">API key</span>
+        <label class="field sm"><input id="cKey" type="password" autocomplete="off" spellcheck="false" placeholder="Not needed on this Mac" aria-label="API key for the any-model engine"></label>
+        <button class="b xs" id="cSaveKey">Save</button>
+        <button class="b ghost xs" id="cDelKey">Remove</button>
+      </div>
+      <div class="msg" id="cMsg">Ollama and LM Studio need no key, and nothing leaves your Mac. A key is checked with one real call, then kept in the macOS Keychain.</div>
+
+      <div class="sub">Model names · leave empty for the built-in model</div>
+      <div id="modelRows"></div>
     </section>
 
     <section id="keys" class="grp">
@@ -117,6 +152,7 @@ select.pick{min-width:170px}
 (async function () {
   const { $, $$, esc, invoke, keyCaps, comboFromEvent, ENGINES } = PMX;
   const ABOUT = {
+    "custom-api": "OpenAI, OpenRouter, Groq, Ollama, LM Studio and more. Set it up below.",
     "anthropic-key": "Pay per use with your own key. Fastest.",
     "claude-plan": "Your Claude subscription, through Claude Code",
     "chatgpt-plan": "Your ChatGPT subscription, through Codex",
@@ -166,7 +202,54 @@ select.pick{min-width:170px}
     const key = engines.find((e) => e.id === "anthropic-key");
     $("#delKey").disabled = !(key && key.ready);
     renderPicks();
+    renderModels();
   }
+
+  // ---------- models: any-model engine, and model names per engine ----------
+  S.models = S.models || {};
+  S.custom_api = S.custom_api || { base_url: "", fast_model: "", max_model: "" };
+  let refreshT;
+  const saveAndRefresh = () => { save(); clearTimeout(refreshT); refreshT = setTimeout(loadEngines, 700); };
+  [["#cBase", "base_url"], ["#cFast", "fast_model"], ["#cMax", "max_model"]].forEach(([sel, k]) => {
+    $(sel).value = S.custom_api[k] || "";
+    $(sel).addEventListener("change", (e) => { S.custom_api[k] = e.target.value.trim(); saveAndRefresh(); });
+  });
+  function renderModels() {
+    const c = engines.find((e) => e.id === "custom-api");
+    $("#cDelKey").disabled = !(c && /key saved/.test(c.detail || ""));
+    if (document.activeElement && document.activeElement.closest("#modelRows")) return; // do not wipe typing
+    $("#modelRows").innerHTML = engines.filter((e) => e.id !== "custom-api").map((e) => {
+      const m = S.models[e.id] || {};
+      const inp = (lvl, def) => `<label class="field sm"><input data-mid="${esc(e.id)}" data-lvl="${lvl}" spellcheck="false" autocomplete="off"
+        value="${esc(m[lvl] || "")}" placeholder="${esc(def || "default")}" aria-label="${esc(e.label)} ${lvl} model"></label>`;
+      return `<div class="mrow"><span class="mlab indent">${esc(e.label)}</span>${inp("fast", e.default_fast)}${inp("max", e.default_max)}</div>`;
+    }).join("");
+  }
+  $("#modelRows").addEventListener("change", (ev) => {
+    const i = ev.target.closest("[data-mid]");
+    if (!i) return;
+    const m = (S.models[i.dataset.mid] = S.models[i.dataset.mid] || { fast: "", max: "" });
+    m[i.dataset.lvl] = i.value.trim();
+    if (!m.fast && !m.max) delete S.models[i.dataset.mid];
+    delete tests[i.dataset.mid];
+    saveAndRefresh();
+  });
+  $("#cSaveKey").addEventListener("click", async () => {
+    const v = $("#cKey").value.trim();
+    if (!v) { $("#cMsg").textContent = "Paste your key first."; return; }
+    $("#cSaveKey").disabled = true; $("#cMsg").className = "msg"; $("#cMsg").textContent = "Checking the key with one real call…";
+    await invoke("save_settings", { settings: S }).catch(() => {});
+    const r = await invoke("save_api_key", { provider: "custom-api", key: v });
+    $("#cKey").value = ""; $("#cSaveKey").disabled = false;
+    $("#cMsg").className = "msg" + (r && r.ok ? " ok" : "");
+    $("#cMsg").textContent = r && r.ok ? `Saved in ${PMX.keyStore()}.` : (r && r.error) || "Couldn't save the key.";
+    loadEngines();
+  });
+  $("#cDelKey").addEventListener("click", async () => {
+    await invoke("delete_api_key", { provider: "custom-api" });
+    $("#cMsg").className = "msg"; $("#cMsg").textContent = `Key removed from ${PMX.keyStore().replace(/^the macOS /, "the ")}.`;
+    delete tests["custom-api"]; loadEngines();
+  });
   function renderPicks() {
     ["#engFast", "#engMax"].forEach((sel) => {
       const el = $(sel), k = el.dataset.k;
@@ -202,12 +285,12 @@ select.pick{min-width:170px}
     const r = await invoke("save_api_key", { provider: "anthropic", key: v });
     $("#apikey").value = ""; $("#saveKey").disabled = false;
     $("#keyMsg").className = "msg" + (r && r.ok ? " ok" : "");
-    $("#keyMsg").textContent = r && r.ok ? "Saved in the macOS Keychain." : (r && r.error) || "Couldn't save the key.";
+    $("#keyMsg").textContent = r && r.ok ? `Saved in ${PMX.keyStore()}.` : (r && r.error) || "Couldn't save the key.";
     loadEngines();
   });
   $("#delKey").addEventListener("click", async () => {
     await invoke("delete_api_key", { provider: "anthropic" });
-    $("#keyMsg").className = "msg"; $("#keyMsg").textContent = "Key removed from the Keychain.";
+    $("#keyMsg").className = "msg"; $("#keyMsg").textContent = `Key removed from ${PMX.keyStore().replace(/^the macOS /, "the ")}.`;
     delete tests["anthropic-key"]; loadEngines();
   });
 

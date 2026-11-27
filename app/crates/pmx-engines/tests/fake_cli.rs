@@ -1,5 +1,6 @@
 //! The CLI engines' process handling, with small shell scripts standing in for the CLIs.
-//! No model calls.
+//! No model calls. Unix only: the stand-ins are `/bin/sh` scripts.
+#![cfg(unix)]
 
 use pmx_engines::{complete_with, run_with, EngineError, EngineId, Event, Level, Request, RunOptions};
 use std::os::unix::fs::PermissionsExt;
@@ -186,11 +187,12 @@ sleep 30"#,
 }
 
 #[tokio::test]
-async fn gemini_takes_the_prompt_as_an_argument() {
+async fn gemini_takes_the_prompt_on_stdin_not_in_the_arguments() {
     let cli = script(
         "gemini-ok",
         r#"[ -n "$GEMINI_SYSTEM_MD" ] && [ "$(cat "$GEMINI_SYSTEM_MD")" = "FRAMEWORK TEXT" ] || exit 5
-case "$*" in *"<draft>"*) ;; *) exit 6;; esac
+case "$*" in *"<draft>"*|*"login page"*) exit 6;; esac
+case "$(cat)" in *"<draft>"*) ;; *) exit 7;; esac
 echo '{"type":"init","model":"x"}'
 echo '{"type":"message","role":"assistant","content":"The login page is broken. ","delta":true}'
 echo '{"type":"message","role":"assistant","content":"Find the cause and fix it.","delta":true}'

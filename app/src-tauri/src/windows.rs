@@ -1,6 +1,10 @@
 //! The three normal windows (settings, history, onboarding): one each, reused, brought to the front.
-use tauri::{ActivationPolicy, AppHandle, Manager, TitleBarStyle, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+//! Windows: normal title bars; the app shows in the taskbar while one of these is open (Windows does that itself).
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+#[cfg(target_os = "macos")]
+use tauri::{ActivationPolicy, TitleBarStyle, WindowEvent};
 
+#[cfg(target_os = "macos")]
 const LABELS: [&str; 3] = ["settings", "history", "onboarding"];
 
 fn spec(label: &str) -> Option<(&'static str, f64, f64)> {
@@ -21,17 +25,35 @@ pub fn open_with(app: &AppHandle, label: &str, focus: bool) -> tauri::Result<()>
     let Some((title, w, h)) = spec(label) else { return Ok(()) };
     let win = match app.get_webview_window(label) {
         Some(win) => win,
-        None => WebviewWindowBuilder::new(app, label, WebviewUrl::App(format!("{label}.html").into()))
-            .title(title)
-            .inner_size(w, h)
-            .min_inner_size(w.min(600.0), 520.0)
-            .title_bar_style(TitleBarStyle::Overlay)
-            .hidden_title(true)
-            .center()
-            .visible(true)
-            .focused(focus)
-            .build()?,
+        None => {
+            let b = WebviewWindowBuilder::new(app, label, WebviewUrl::App(format!("{label}.html").into()))
+                .title(title)
+                .inner_size(w, h)
+                .min_inner_size(w.min(600.0), 520.0);
+            #[cfg(target_os = "macos")]
+            let b = b.title_bar_style(TitleBarStyle::Overlay).hidden_title(true);
+            b.center().visible(true).focused(focus).build()?
+        }
     };
+    #[cfg(target_os = "macos")]
+    mac_policy(app, &win, label, focus);
+    let _ = win.unminimize();
+    // Put it in front of the person: on the screen under the mouse and on the desktop (Space) they are on now.
+    // Without this, with two screens or a full-screen app, the window opens somewhere out of view and the
+    // menu looks dead.
+    center_on_mouse_screen(app, &win);
+    let _ = win.show();
+    #[cfg(target_os = "macos")]
+    mac_front(app, &win, focus);
+    if focus {
+        let _ = win.set_focus();
+    }
+    Ok(())
+}
+
+/// Dock icon while a normal window is open; menu bar only after the last one closes.
+#[cfg(target_os = "macos")]
+fn mac_policy(app: &AppHandle, win: &tauri::WebviewWindow, label: &str, focus: bool) {
     if focus {
         // A normal window is open: show promptmaxxer in the Dock and app switcher, like any app.
         let _ = app.set_activation_policy(ActivationPolicy::Regular);
@@ -47,12 +69,11 @@ pub fn open_with(app: &AppHandle, label: &str, focus: bool) -> tauri::Result<()>
             }
         }
     });
-    let _ = win.unminimize();
-    // Put it in front of the person: on the screen under the mouse and on the desktop (Space) they are on now.
-    // Without this, with two screens or a full-screen app, the window opens somewhere out of view and the
-    // menu looks dead.
-    center_on_mouse_screen(app, &win);
-    let _ = win.show();
+}
+
+/// On the Space in view and in front, even though a menu bar app is never the active app.
+#[cfg(target_os = "macos")]
+fn mac_front(app: &AppHandle, win: &tauri::WebviewWindow, focus: bool) {
     let w2 = win.clone();
     let _ = app.run_on_main_thread(move || {
         if let Ok(ptr) = w2.ns_window() {
@@ -75,10 +96,6 @@ pub fn open_with(app: &AppHandle, label: &str, focus: bool) -> tauri::Result<()>
             }
         }
     });
-    if focus {
-        let _ = win.set_focus();
-    }
-    Ok(())
 }
 
 /// Centre the window on the monitor that holds the mouse pointer.

@@ -17,6 +17,7 @@ pub(crate) struct Proc {
     pub exe: Option<String>,
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const NODEV: u32 = u32::MAX;
 
 /// Shell names (comm, without a leading "-").
@@ -174,6 +175,12 @@ mod mac {
 pub(crate) use mac::{all, cwd, exe_path, tty_path};
 
 /// Last input time on a tty (its device's access time, as `w` uses for idle), in nanoseconds.
+#[cfg(not(unix))]
+pub(crate) fn tty_last_input(_dev: u32) -> u128 {
+    0
+}
+
+#[cfg(unix)]
 pub(crate) fn tty_last_input(dev: u32) -> u128 {
     use std::os::unix::fs::MetadataExt;
     let Some(p) = tty_path(dev) else { return 0 };
