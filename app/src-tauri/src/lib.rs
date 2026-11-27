@@ -1,35 +1,39 @@
 //! promptmaxxer: the menu bar app. Library half, so tests and the headless mode share the code.
 //! - `press`: one press, start to end (copy, context, engine, floating bar, paste, history).
-//! - `selection`: copy the selection and put the result back; `mac`: macOS calls.
+//! - `selection`: copy the selection and put the result back; `mac`: macOS calls (`win.rs` on Windows, same names).
 //! - `context`: target, project, sources, brief (pmx-context); engines come from pmx-engines.
 //! - `bar`, `windows`, `tray`, `keys`, `commands`: the UI side.
 //! - `settings`, `history`, `log`, `paths`: files on disk.
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub mod bar;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub mod commands;
 pub mod context;
 pub mod headless;
 pub mod history;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub mod keys;
 pub mod log;
 #[cfg(target_os = "macos")]
 pub mod mac;
+#[cfg(windows)]
+pub mod win;
+#[cfg(windows)]
+pub use win as mac;
 pub mod paths;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub mod press;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub mod selection;
 pub mod settings;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub mod tray;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub mod windows;
 
 /// A notification from the app itself (BRAND.md messages).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub fn notify(app: &tauri::AppHandle, msg: &str) {
     use tauri_plugin_notification::NotificationExt;
     if let Err(e) = app.notification().builder().title("promptmaxxer").body(msg).show() {
@@ -37,7 +41,7 @@ pub fn notify(app: &tauri::AppHandle, msg: &str) {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub fn run() {
     use tauri::Manager;
     log::log(&format!("start: promptmaxxer {} launching (settings {})", env!("CARGO_PKG_VERSION"), settings::path().display()));
@@ -70,8 +74,10 @@ pub fn run() {
             commands::open_settings,
             commands::open_history,
             commands::context_preview,
+            commands::app_platform,
         ])
         .setup(|app| {
+            #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             press::set_app(app.handle().clone());
             mac::start_clipboard_watch();
@@ -114,10 +120,13 @@ pub fn run() {
         // Menu bar app: closing the last window never quits.
         tauri::RunEvent::ExitRequested { api, code: None, .. } => api.prevent_exit(),
         // Opened again from Applications, Spotlight or the Dock while running: show the app window.
+        #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => {
             let label = if settings::load().onboarded { "settings" } else { "onboarding" };
             let _ = windows::open(app, label);
         }
-        _ => {}
+        _ => {
+            let _ = app; // used only by the macOS Reopen arm
+        }
     });
 }

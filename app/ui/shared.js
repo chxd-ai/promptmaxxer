@@ -8,6 +8,9 @@
   const LIVE = !!(T && T.core && T.core.invoke && T.event && T.event.listen);
   const q = new URLSearchParams(location.search);
   document.documentElement.classList.add(LIVE ? "tauri" : "mock");
+  // Windows or macOS. First guess from the web view (WebView2 says "Windows NT"); the app's `app_platform`
+  // answer below confirms it. Browser preview: ?os=windows.
+  let WIN = q.has("os") ? q.get("os") === "windows" : /Windows/i.test(navigator.userAgent);
 
   // Engine ids and labels; the backend label wins when present.
   const ENGINES = [
@@ -88,6 +91,7 @@
       history_copy: () => null,
       history_rerun: () => null,
       history_thumb: ({ id, up }) => { const h = history.find((x) => x.id === id); if (h) h.thumb = up; return null; },
+      app_platform: () => (WIN ? "windows" : "macos"),
       check_accessibility: () => ax,
       open_accessibility_settings: () => { setTimeout(() => { ax = true; }, 2500); return null; },
       finish_onboarding: () => { settings.onboarded = true; return null; },
@@ -130,9 +134,10 @@
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  // "Ctrl+Alt+Space" -> ["⌃","⌥","Space"]
+  // "Ctrl+Alt+Space" -> ["⌃","⌥","Space"]; on Windows -> ["Ctrl","Alt","Space"]
   const KEYMAP = { ctrl: "⌃", control: "⌃", alt: "⌥", option: "⌥", shift: "⇧", cmd: "⌘", command: "⌘", super: "⌘", commandorcontrol: "⌘" };
-  const keyParts = (combo) => String(combo || "").split("+").filter(Boolean).map((p) => KEYMAP[p.toLowerCase()] || p);
+  const KEYMAP_WIN = { ctrl: "Ctrl", control: "Ctrl", alt: "Alt", option: "Alt", shift: "Shift", cmd: "Win", command: "Win", super: "Win", commandorcontrol: "Ctrl" };
+  const keyParts = (combo) => String(combo || "").split("+").filter(Boolean).map((p) => (WIN ? KEYMAP_WIN : KEYMAP)[p.toLowerCase()] || p);
   const keyCaps = (combo, cls) => keyParts(combo).map((k) => `<span class="kc ${cls || "sm"}">${esc(k)}</span>`).join("");
   // keydown -> "Ctrl+Alt+Space" (Tauri global-shortcut format), or null while only modifiers are down
   function comboFromEvent(e) {
@@ -178,5 +183,29 @@
     x: '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
   };
 
-  window.PMX = { LIVE, query: q, invoke, listen, mockEmit: mock.emit, ENGINES, engineLabel, $, $$, esc, keyParts, keyCaps, comboFromEvent, ago, toast, ICON };
+  // "macos" or "windows", from the app (mock: the guess above).
+  async function platform() {
+    try { WIN = (await invoke("app_platform")) === "windows"; } catch (e) {}
+    return WIN ? "windows" : "macos";
+  }
+  // Where API keys are kept, for messages.
+  const keyStore = () => (WIN ? "Windows Credential Manager" : "the macOS Keychain");
+  // Windows: the page's Mac words become PC words (text and placeholders), once at load.
+  function windowsWords(root) {
+    const swap = (s) => s.replace(/the macOS Keychain/g, "Windows Credential Manager").replace(/\bthis Mac\b/g, "this PC")
+      .replace(/\byour Mac\b/g, "your PC").replace(/\bon a Mac\b/g, "on a PC").replace(/\bthe Mac\b/g, "the PC");
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) { const t = swap(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t; }
+    root.querySelectorAll("[placeholder]").forEach((el) => { el.placeholder = swap(el.placeholder); });
+  }
+  const platformReady = platform().then((p) => {
+    if (p === "windows") {
+      document.documentElement.classList.add("win");
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => windowsWords(document.body));
+      else windowsWords(document.body);
+    }
+    return p;
+  });
+
+  window.PMX = { LIVE, query: q, invoke, listen, platform: () => platformReady, keyStore, mockEmit: mock.emit, ENGINES, engineLabel, $, $$, esc, keyParts, keyCaps, comboFromEvent, ago, toast, ICON };
 })();

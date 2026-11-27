@@ -1,4 +1,4 @@
-//! Settings: `~/.local/share/promptmaxxer/settings.json`, file mode 600.
+//! Settings: `~/.local/share/promptmaxxer/settings.json`, file mode 600 (Windows: `%APPDATA%\promptmaxxer\settings.json`).
 //! `PMX_SETTINGS=/path/settings.json` points the app at another file (tests).
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -6,7 +6,18 @@ use std::path::{Path, PathBuf};
 /// Default keys. Max is Ctrl+Shift+Space, not Ctrl+Option+Space: Control+Option is a common
 /// push-to-talk chord in voice tools, and Ctrl+Option+Space is macOS's own "next input source" key.
 /// Ctrl+Shift+Space is free by default on macOS.
+#[cfg(not(windows))]
 pub const DEFAULT_FAST_KEY: &str = "Alt+Space";
+#[cfg(not(windows))]
+pub const DEFAULT_MAX_KEY: &str = "Ctrl+Shift+Space";
+
+/// Windows default keys. Alt+Space is taken on Windows: it opens every window's system menu (and PowerToys Run
+/// uses it). Ctrl+Space switches the input language with Chinese, Japanese and Korean keyboards, and Win+Space
+/// switches keyboard layouts. Ctrl+Alt+Space is free on a standard Windows install; Ctrl+Shift+Space stays the
+/// max key, as on macOS.
+#[cfg(windows)]
+pub const DEFAULT_FAST_KEY: &str = "Ctrl+Alt+Space";
+#[cfg(windows)]
 pub const DEFAULT_MAX_KEY: &str = "Ctrl+Shift+Space";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -140,17 +151,16 @@ pub fn save(s: &Settings) -> std::io::Result<()> {
 }
 
 pub fn save_to(p: &Path, s: &Settings) -> std::io::Result<()> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = p.with_extension(format!("json.tmp{}", std::process::id()));
     {
         use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+        let mut f = crate::paths::private_file(&tmp, true)?;
         f.write_all(&serde_json::to_vec_pretty(s).map_err(std::io::Error::other)?)?;
     }
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    crate::paths::set_private(&tmp)?;
     std::fs::rename(&tmp, p)
 }
 
@@ -188,6 +198,7 @@ mod tests {
         assert_eq!(s.engine_pref(Level::Max), Some(EngineId::ChatGptPlan));
     }
 
+    #[cfg(unix)]
     #[test]
     fn save_is_mode_600_and_round_trips() {
         use std::os::unix::fs::PermissionsExt;

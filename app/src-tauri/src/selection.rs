@@ -76,7 +76,11 @@ pub async fn capture() -> Result<Captured, CaptureError> {
     }
     let saved = mac::save_clipboard();
     let before = mac::change_count();
-    if let Err(e) = mac::cmd_key(mac::KEY_C) {
+    #[cfg(target_os = "macos")]
+    let copy = mac::cmd_key(mac::KEY_C);
+    #[cfg(windows)]
+    let copy = mac::copy_selection(&app);
+    if let Err(e) = copy {
         log(&format!("capture: Cmd+C failed: {e}"));
     }
     let copied = wait_until(COPY_TIMEOUT, || mac::change_count() != before).await;
@@ -137,7 +141,8 @@ pub async fn deliver(c: Captured, text: &str) -> Delivery {
     Delivery::Pasted
 }
 
-#[cfg(test)]
+// The app lists checked here are the macOS ones; win.rs tests its own.
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 

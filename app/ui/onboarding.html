@@ -145,7 +145,12 @@ body{display:flex;flex-direction:column;min-width:560px}
 <script>
 (async function () {
   const { $, $$, esc, invoke, listen, keyCaps } = PMX;
+  // Windows has no Accessibility permission: its step (3) is skipped.
+  const isWin = (await PMX.platform()) === "windows";
+  const STEPS = isWin ? [1, 2, 4] : [1, 2, 3, 4];
+  if (isWin) $$("#steps i")[2].remove();
   let step = Math.min(4, Math.max(1, +(PMX.query.get("step") || 1)));
+  if (!STEPS.includes(step)) step = 4;
   let fastKey = "Alt+Space", maxKey = "Ctrl+Shift+Space", tested = false, ax = false, tried = false, axTimer = null;
   const tests = {};
   try { const S = await invoke("get_settings"); fastKey = S.fast_key || fastKey; maxKey = S.max_key || maxKey; } catch (e) {}
@@ -186,7 +191,7 @@ body{display:flex;flex-direction:column;min-width:560px}
     if (!v) { $("#keyMsg").textContent = "Paste your key first."; return; }
     const r = await invoke("save_api_key", { provider: "anthropic", key: v });
     $("#apikey").value = "";
-    $("#keyMsg").textContent = r && r.ok ? "Saved in the macOS Keychain. Testing it now." : (r && r.error) || "Couldn't save the key.";
+    $("#keyMsg").textContent = r && r.ok ? `Saved in ${PMX.keyStore()}. Testing it now.` : (r && r.error) || "Couldn't save the key.";
     await loadEngines();
     if (r && r.ok) runTest("anthropic-key");
   });
@@ -206,8 +211,9 @@ body{display:flex;flex-direction:column;min-width:560px}
 
   // ---------- navigation ----------
   function nav() {
-    $$("#steps i").forEach((el, i) => { el.className = i + 1 < step ? "done" : i + 1 === step ? "now" : ""; });
-    $("#stepLabel").textContent = `Step ${step} of 4`;
+    const at = STEPS.indexOf(step);
+    $$("#steps i").forEach((el, i) => { el.className = i < at ? "done" : i === at ? "now" : ""; });
+    $("#stepLabel").textContent = `Step ${at + 1} of ${STEPS.length}`;
     $("#back").classList.toggle("inv", step === 1);
     $("#next").textContent = step === 4 ? "Finish" : "Continue";
     $("#next").disabled = (step === 2 && !tested) || (step === 3 && !ax);
@@ -221,9 +227,9 @@ body{display:flex;flex-direction:column;min-width:560px}
     if (n === 4) renderTry();
     nav();
   }
-  $("#back").addEventListener("click", () => step > 1 && show(step - 1));
+  $("#back").addEventListener("click", () => step > 1 && show(STEPS[STEPS.indexOf(step) - 1]));
   $("#next").addEventListener("click", async () => {
-    if (step < 4) return show(step + 1);
+    if (step < 4) return show(STEPS[STEPS.indexOf(step) + 1]);
     $("#next").disabled = true;
     await invoke("finish_onboarding");
   });

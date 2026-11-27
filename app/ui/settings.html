@@ -242,12 +242,12 @@ select.pick{min-width:170px}
     const r = await invoke("save_api_key", { provider: "custom-api", key: v });
     $("#cKey").value = ""; $("#cSaveKey").disabled = false;
     $("#cMsg").className = "msg" + (r && r.ok ? " ok" : "");
-    $("#cMsg").textContent = r && r.ok ? "Saved in the macOS Keychain." : (r && r.error) || "Couldn't save the key.";
+    $("#cMsg").textContent = r && r.ok ? `Saved in ${PMX.keyStore()}.` : (r && r.error) || "Couldn't save the key.";
     loadEngines();
   });
   $("#cDelKey").addEventListener("click", async () => {
     await invoke("delete_api_key", { provider: "custom-api" });
-    $("#cMsg").className = "msg"; $("#cMsg").textContent = "Key removed from the Keychain.";
+    $("#cMsg").className = "msg"; $("#cMsg").textContent = `Key removed from ${PMX.keyStore().replace(/^the macOS /, "the ")}.`;
     delete tests["custom-api"]; loadEngines();
   });
   function renderPicks() {
@@ -285,12 +285,12 @@ select.pick{min-width:170px}
     const r = await invoke("save_api_key", { provider: "anthropic", key: v });
     $("#apikey").value = ""; $("#saveKey").disabled = false;
     $("#keyMsg").className = "msg" + (r && r.ok ? " ok" : "");
-    $("#keyMsg").textContent = r && r.ok ? "Saved in the macOS Keychain." : (r && r.error) || "Couldn't save the key.";
+    $("#keyMsg").textContent = r && r.ok ? `Saved in ${PMX.keyStore()}.` : (r && r.error) || "Couldn't save the key.";
     loadEngines();
   });
   $("#delKey").addEventListener("click", async () => {
     await invoke("delete_api_key", { provider: "anthropic" });
-    $("#keyMsg").className = "msg"; $("#keyMsg").textContent = "Key removed from the Keychain.";
+    $("#keyMsg").className = "msg"; $("#keyMsg").textContent = `Key removed from ${PMX.keyStore().replace(/^the macOS /, "the ")}.`;
     delete tests["anthropic-key"]; loadEngines();
   });
 

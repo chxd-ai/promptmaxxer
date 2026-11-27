@@ -57,16 +57,14 @@ pub fn append(r: &Row) -> Option<String> {
 }
 
 fn set_600(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+    crate::paths::set_private(path)
 }
 
 pub fn append_value(path: &Path, v: &Value) -> std::io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
+    let mut f = crate::paths::private_file(path, false)?;
     f.write_all(format!("{v}\n").as_bytes())?;
     set_600(path)
 }
@@ -91,10 +89,9 @@ pub fn read_all(path: &Path) -> Vec<Value> {
 }
 
 fn write_all(path: &Path, rows: &[Value]) -> std::io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
     let tmp = path.with_extension(format!("jsonl.tmp{}", std::process::id()));
     {
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+        let mut f = crate::paths::private_file(&tmp, true)?;
         for r in rows {
             f.write_all(format!("{r}\n").as_bytes())?;
         }
@@ -173,6 +170,7 @@ pub fn thumb(path: &Path, id: &str, up: Option<bool>) -> std::io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     fn tmp(name: &str) -> PathBuf {
@@ -198,6 +196,7 @@ mod tests {
             assert!(v.get(k).is_some(), "missing key {k}");
         }
         assert_eq!(v["model"], json!(["haiku"]));
+        #[cfg(unix)]
         assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
         let ids: Vec<_> = read_all(&p).iter().map(|v| v["id"].clone()).collect();
         assert_ne!(ids[0], ids[1]);
@@ -227,6 +226,7 @@ mod tests {
         assert_eq!(get(&p, "2026-11-22T10:00:00-0").unwrap()["thumb"], json!(false));
         delete(&p, Some("2026-11-22T10:00:00-0")).unwrap();
         assert_eq!(list(&p, "").len(), 2);
+        #[cfg(unix)]
         assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
         delete(&p, None).unwrap();
         assert!(list(&p, "").is_empty());

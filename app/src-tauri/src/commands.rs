@@ -216,3 +216,13 @@ pub fn open_history(app: AppHandle) -> Result<(), String> {
 pub fn context_preview() -> crate::context::Preview {
     press::preview()
 }
+
+/// "macos" or "windows". The UI skips the Accessibility step and shows Windows key names (Ctrl, Alt) on Windows.
+#[tauri::command]
+pub fn app_platform() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else {
+        "macos"
+    }
+}
