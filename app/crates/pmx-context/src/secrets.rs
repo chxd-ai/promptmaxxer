@@ -78,7 +78,7 @@ fn rules() -> &'static Rules {
         Rules {
             shapes,
             // Authorization: Token <value> (Django REST, many APIs). The header name stays.
-            auth_token: Regex::new(r#"(?P<pre>(?i:\bauthorization)["']?[ \t]*[:=][ \t]*["']?(?i:token)[ \t]+)(?P<val>[A-Za-z0-9\-._~+/=]{8,})"#).unwrap(),
+            auth_token: Regex::new(r#"(?P<pre>(?i:\bauthorization)["']?[ \t]*[:=][ \t]*["']?(?i:token)[ \t]+)(?P<val>[A-Za-z0-9\-._~+/=]*[0-9][A-Za-z0-9\-._~+/=]*)"#).unwrap(),
             // scheme://user:password@host
             url_password: Regex::new(r"(?P<pre>\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^/\s:@]+:)(?P<pw>[^@\s/]+)@").unwrap(),
             // "token": "value"   api_key = 'value'   password: "value"
@@ -192,7 +192,13 @@ pub fn scrub_secrets(text: &str) -> String {
             out = re.replace_all(&out, SECRET_MARK).into_owned();
         }
     }
-    out = r.auth_token.replace_all(&out, |c: &Captures| format!("{}{}", &c["pre"], SECRET_MARK)).into_owned();
+    // A value needs a digit and 8+ characters: "Authorization: Token authentication" is prose, not a token.
+    out = r
+        .auth_token
+        .replace_all(&out, |c: &Captures| {
+            if c["val"].len() >= 8 { format!("{}{}", &c["pre"], SECRET_MARK) } else { c[0].to_string() }
+        })
+        .into_owned();
     out = r
         .url_password
         .replace_all(&out, |c: &Captures| {
@@ -377,12 +383,13 @@ mod tests {
         for t in &toks {
             gone(&format!("use {t} now"), t);
         }
-        let v = rep('z', 40);
+        // A real Django REST token: 40 hex characters.
+        let v = "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b".to_string();
         let out = scrub_secrets(&format!("curl -H \"Authorization: Token {v}\" https://api.example.com"));
         assert!(!out.contains(&v), "{out}");
         assert!(out.contains("Authorization: Token [secret removed]"), "{out}");
         // Ordinary text with these words stays.
-        for keep in ["The xai- prefix is used by xAI.", "Use a token based login.", "Meeting at 10:30 today", "Authorization: Token based"] {
+        for keep in ["The xai- prefix is used by xAI.", "Use a token based login.", "Meeting at 10:30 today", "Authorization: Token based", "Authorization: Token authentication"] {
             assert_eq!(scrub_secrets(keep), keep);
         }
     }

@@ -110,8 +110,12 @@ def enhance(draft: str, level: str, app: str, model: str, framework: Path, effor
 def log(row: dict) -> None:
     try:
         SHARE.mkdir(parents=True, exist_ok=True)
-        with open(HISTORY, "a") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        import fcntl
+        # Same lock as the app (history.rs): its thumb/delete rewrite must not drop this row.
+        with open(str(HISTORY) + ".lock", "a") as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            with open(HISTORY, "a") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
         os.chmod(HISTORY, 0o600)
     except Exception:
         pass

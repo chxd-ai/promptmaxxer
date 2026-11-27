@@ -22,6 +22,10 @@ pub(crate) fn scratch_home() -> PathBuf {
 
 /// Create the throwaway home: mode 700, links to `auth.json` and the auth lock files, nothing else.
 pub(crate) fn prepare_home(real: &Path, scratch: &Path) -> std::io::Result<()> {
+    crate::paths::setup_once(|| prepare_home_now(real, scratch))
+}
+
+fn prepare_home_now(real: &Path, scratch: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(scratch)?;
     // Windows: the per-user temp folder is already private to the user.
     #[cfg(unix)]

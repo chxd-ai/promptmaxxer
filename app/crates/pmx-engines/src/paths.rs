@@ -427,3 +427,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// One scratch-home setup at a time in this process (the background brief and a key press can start
+/// together). On Windows a file another process holds open cannot be replaced (error 32, sometimes 5):
+/// such a setup is tried again a few times before it fails.
+pub(crate) fn setup_once(f: impl Fn() -> std::io::Result<()>) -> std::io::Result<()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut tries = 0;
+    loop {
+        match f() {
+            Err(e) if cfg!(windows) && matches!(e.raw_os_error(), Some(32) | Some(5)) && tries < 8 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(40 * tries));
+            }
+            r => return r,
+        }
+    }
+}

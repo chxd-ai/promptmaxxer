@@ -9,12 +9,26 @@ use std::sync::{Mutex, MutexGuard};
 /// Rows kept: the newest this many. Older rows are dropped when a row is added.
 pub const MAX_ROWS: usize = 2000;
 
-/// One writer at a time in this process: a thumb or delete rewrite that overlapped an append would drop the
-/// appended row.
+/// One writer at a time: a thumb or delete rewrite that overlapped an append would drop the appended row.
+/// The mutex covers this process; a lock on `history.jsonl.lock` covers other processes (`bin/promptmaxx`
+/// takes the same lock with `flock`). If the lock file cannot be opened, only the mutex is held.
 static WRITE: Mutex<()> = Mutex::new(());
 
-fn write_lock() -> MutexGuard<'static, ()> {
-    WRITE.lock().unwrap_or_else(|e| e.into_inner())
+struct WriteLock {
+    _m: MutexGuard<'static, ()>,
+    _f: Option<std::fs::File>,
+}
+
+fn write_lock(path: &Path) -> WriteLock {
+    let m = WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let mut name = path.as_os_str().to_owned();
+    name.push(".lock");
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(PathBuf::from(name)).ok();
+    let f = f.filter(|f| f.lock().is_ok());
+    WriteLock { _m: m, _f: f }
 }
 
 pub struct Row<'a> {
@@ -77,7 +91,7 @@ pub fn append_value(path: &Path, v: &Value) -> std::io::Result<()> {
 }
 
 fn append_capped(path: &Path, v: &Value, max: usize) -> std::io::Result<()> {
-    let _w = write_lock();
+    let _w = write_lock(path);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -174,7 +188,7 @@ pub fn delete(path: &Path, id: Option<&str>) -> std::io::Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let _w = write_lock();
+    let _w = write_lock(path);
     let rows: Vec<Value> = match id {
         None => vec![],
         Some(id) => read_all(path).into_iter().filter(|v| v["id"] != id).collect(),
@@ -183,7 +197,7 @@ pub fn delete(path: &Path, id: Option<&str>) -> std::io::Result<()> {
 }
 
 pub fn thumb(path: &Path, id: &str, up: Option<bool>) -> std::io::Result<bool> {
-    let _w = write_lock();
+    let _w = write_lock(path);
     let mut rows = read_all(path);
     let mut found = false;
     for v in rows.iter_mut().filter(|v| v["id"] == id) {

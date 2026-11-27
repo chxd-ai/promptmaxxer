@@ -41,6 +41,10 @@ pub(crate) fn signed_in(real: &Path) -> (bool, &'static str) {
 }
 
 pub(crate) fn prepare_home(real: &Path, scratch_home: &Path) -> std::io::Result<()> {
+    crate::paths::setup_once(|| prepare_home_now(real, scratch_home))
+}
+
+fn prepare_home_now(real: &Path, scratch_home: &Path) -> std::io::Result<()> {
     let dir = scratch_home.join(".gemini");
     std::fs::create_dir_all(&dir)?;
     // Windows: the per-user temp folder is already private to the user.
