@@ -111,8 +111,8 @@ reasoning models are removed from the result.
 
 ## Requirements
 
-- macOS 12 or later.
-- Accessibility permission (System Settings > Privacy & Security > Accessibility), so the app can copy and paste
+- macOS 12 or later, or Windows 10/11 (see [Windows](#windows)).
+- macOS: Accessibility permission (System Settings > Privacy & Security > Accessibility), so the app can copy and paste
   for you. The first-run screens walk you through it.
 - At least one engine from the table above.
 
@@ -161,6 +161,31 @@ echo "fix the login bug on mobile" | \
 Flags: `--level standard|max`, `--app NAME`, `--engine custom-api|anthropic-key|claude-plan|chatgpt-plan|gemini-plan`,
 `--project DIR`, `--target HINT`, `--no-brief`. On failure it prints the draft unchanged and exits with code 1.
 
+### Windows
+
+Windows 10 and 11 are supported. CI (`.github/workflows/ci.yml`) builds an unsigned NSIS installer
+(`promptmaxxer_<version>_x64-setup.exe`, per-user, no admin rights) on every push and keeps it as a build
+artifact. To build it yourself on Windows, install Rust and the Tauri CLI as above, then in `app\src-tauri`:
+`cargo tauri build --bundles nsis`. Windows shows a SmartScreen warning for an unsigned installer.
+
+How it differs from macOS:
+
+- Keys: `Ctrl+Alt+Space` (fast) and `Ctrl+Shift+Space` (max). `Alt+Space` is the Windows window menu.
+- No Accessibility permission: the first-run screens skip that step.
+- The menu bar icon is a system tray icon.
+- API keys are stored in Windows Credential Manager (generic credentials `promptmaxxer:anthropic` and
+  `promptmaxxer:custom-api`).
+- Files: settings, history, briefs and the log are in `%APPDATA%\promptmaxxer`.
+- Project context: Windows offers no clean way to read a terminal's working folder, so there is no automatic
+  project brief. Pin a project in Settings to use one.
+- The floating bar opens near the mouse, not under the selection.
+- Terminals (Windows Terminal, PowerShell, Command Prompt, Git Bash) get the result on the clipboard. The copy in
+  terminals and VS Code style editors uses `Ctrl+Insert`, which never interrupts a running program the way
+  `Ctrl+C` does there.
+- Apps running as administrator do not accept keys from a normal app (Windows UIPI): a press there copies nothing.
+- CLI engines installed with npm (`claude.cmd`, `codex.cmd`, `gemini.cmd` in `%APPDATA%\npm`) are started through
+  `node`, not `cmd.exe`.
+
 `bin/promptmaxx` is the original Python prototype of the rewrite step (Claude Code CLI only). The eval harness uses
 it as its reference runner.
 
@@ -190,13 +215,15 @@ Reports go to `evals/results/` (not tracked).
 - What is sent: the highlighted text, the app name and target, the cached project brief, and the rulebook.
   The highlighted text is sent as it is: do not highlight secrets. The project instruction files are scrubbed of
   keys and passwords before they are summarised, and the brief is scrubbed again.
-- API keys are stored in the macOS login Keychain (service `promptmaxxer`, accounts `anthropic` and `custom-api`),
+- API keys are stored in the macOS login Keychain (service `promptmaxxer`, accounts `anthropic` and `custom-api`;
+  on Windows: Credential Manager),
   never in a file or a log.
 - Files on your Mac:
   - settings: `~/.local/share/promptmaxxer/settings.json`
   - history (drafts and results): `~/.local/share/promptmaxxer/history.jsonl`, file mode 600; turn it off in Settings
   - project briefs: `~/.local/share/promptmaxxer/briefs/`
   - log (no keys, no selected text): `~/Library/Logs/promptmaxxer.log`
+  - Windows: all of these in `%APPDATA%\promptmaxxer` (log: `promptmaxxer.log`)
 - The app never presses Enter or sends anything: it only replaces the text you highlighted.
 
 ## Repository layout
